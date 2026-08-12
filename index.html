@@ -107,11 +107,25 @@
   td.cell.UNPAID{
     background:repeating-linear-gradient(45deg, var(--panel), var(--panel) 4px, #b8b2a2 4px, #b8b2a2 8px);
   }
+  .swatch.weekend{background:var(--yellow);}
+  .swatch.work{background:var(--green);}
+  .swatch.OFF{background:var(--red);}
+  .swatch.SICK{background:var(--skyblue);}
+  .swatch.REQ{background:var(--grey);}
+  .swatch.UNPAID{
+    background:repeating-linear-gradient(45deg, var(--panel), var(--panel) 3px, #b8b2a2 3px, #b8b2a2 6px);
+  }
   td.cell.moved{outline:2px solid var(--blue-past-strong); outline-offset:-2px;}
   td.cell.range-anchor{box-shadow: inset 0 0 0 2px var(--ink);}
   td.cell.range-selected{box-shadow: inset 0 0 0 2px var(--ink); filter:brightness(0.92);}
   td.cell.selectable-target{background:#eafaf0 !important; box-shadow: inset 0 0 0 2px var(--green-strong);}
   td.cell span.code{font-weight:700;font-size:10px;color:#2a2a2a;position:relative;z-index:2;}
+  .half-off{background: linear-gradient(to bottom left, var(--red) 50%, var(--green) 50%);}
+  .half-sick{background: linear-gradient(to bottom left, var(--skyblue) 50%, var(--green) 50%);}
+  .half-badge{
+    position:absolute;top:1px;right:2px;font-size:10px;font-weight:800;color:#fff;z-index:2;
+    text-shadow:0 0 2px rgba(0,0,0,.7), 0 0 1px rgba(0,0,0,.7);
+  }
   .shift-badge{
     position:absolute;top:0px;left:0px;width:16px;height:16px;border-radius:50%;
     font-size:11px;font-weight:800;color:#fff;line-height:16px;text-align:center;z-index:2;
@@ -293,20 +307,24 @@
     {key:'A',      label:'Afternoon shift',     status:'WORK', shift:'A',  swatch:'work', badge:'A'},
     {key:'OFF',    label:'Day off',             status:'OFF',  shift:null, swatch:'OFF'},
     {key:'SICK',   label:'Sick day',            status:'SICK', shift:null, swatch:'SICK'},
+    {key:'HALF_OFF',  label:'Half day off',  status:'HALF', shift:null, half:'OFF',  swatch:'half-off'},
+    {key:'HALF_SICK', label:'Half day sick', status:'HALF', shift:null, half:'SICK', swatch:'half-sick'},
     {key:'REQ',    label:'Requested day off',   status:'REQ',  shift:null, swatch:'REQ'},
     {key:'UNPAID', label:'Unpaid day off',      status:'UNPAID', shift:null, swatch:'UNPAID'},
   ];
   const STATUS_LABEL = {WORK:'Work day', OFF:'Day off', SICK:'Sick day', REQ:'Requested day off', UNPAID:'Unpaid day off'};
   const SHIFT_LABEL = {M:'Morning shift', A:'Afternoon shift'};
-  // quick single-click cycle order (composite status|shift)
+  // quick single-click cycle order (composite status|shift|half)
   const CYCLE = [
-    {status:'WORK', shift:null},
-    {status:'WORK', shift:'M'},
-    {status:'WORK', shift:'A'},
-    {status:'OFF', shift:null},
-    {status:'SICK', shift:null},
-    {status:'REQ', shift:null},
-    {status:'UNPAID', shift:null},
+    {status:'WORK', shift:null, half:null},
+    {status:'WORK', shift:'M', half:null},
+    {status:'WORK', shift:'A', half:null},
+    {status:'OFF', shift:null, half:null},
+    {status:'SICK', shift:null, half:null},
+    {status:'HALF', shift:null, half:'OFF'},
+    {status:'HALF', shift:null, half:'SICK'},
+    {status:'REQ', shift:null, half:null},
+    {status:'UNPAID', shift:null, half:null},
   ];
 
   // ---------- storage: Supabase (free hosted database) with localStorage as an offline cache ----------
@@ -660,12 +678,17 @@
       const isHoliday = !!holidays[hKey];
       const rec = getCell(year, month, d, empId);
       const status = rec ? rec.status : ((weekend||isHoliday) ? null : 'WORK');
+      const half = rec ? (rec.half || null) : null;
       const moved = rec ? !!rec.moved : false;
       if(status==='WORK'){ totals.on++; if(moved) totals.extra++; }
       else if(status==='OFF'){ totals.off++; }
       else if(status==='SICK'){ totals.sick++; }
       else if(status==='REQ'){ totals.req++; }
       else if(status==='UNPAID'){ totals.unpaid++; }
+      else if(status==='HALF'){
+        totals.on += 0.5;
+        if(half==='SICK') totals.sick += 0.5; else totals.off += 0.5;
+      }
     }
     return totals;
   }
@@ -813,6 +836,7 @@
 
         const status = rec ? rec.status : null;
         const shift = rec ? rec.shift : null;
+        const half = rec ? (rec.half || null) : null;
         const moved = rec ? !!rec.moved : false;
 
         if(status===null){
@@ -821,6 +845,8 @@
           td.classList.add('work');
         } else if(status==='OFF' && moved){
           td.classList.add('weekend'); // a weekend day moved here — should look like a weekend day off
+        } else if(status==='HALF'){
+          td.classList.add(half==='SICK' ? 'half-sick' : 'half-off');
         } else {
           td.classList.add(status);
         }
@@ -838,13 +864,18 @@
           badge.className = 'shift-badge shift-' + shift;
           badge.textContent = shift;
           td.appendChild(badge);
+        } else if(status==='HALF'){
+          const badge = document.createElement('span');
+          badge.className = 'half-badge';
+          badge.textContent = half==='SICK' ? 'S' : 'O';
+          td.appendChild(badge);
         } else if(status && status!=='WORK' && !(status==='OFF' && moved)){
           const span = document.createElement('span'); span.className='code';
           span.textContent = status[0];
           td.appendChild(span);
         }
 
-        let tooltip = shift ? SHIFT_LABEL[shift] : (status ? STATUS_LABEL[status] : ((weekend||isHoliday) ? 'Weekend/holiday (default off)' : 'Work day (default)'));
+        let tooltip = shift ? SHIFT_LABEL[shift] : (status==='HALF' ? (half==='SICK' ? 'Half day sick' : 'Half day off') : (status ? STATUS_LABEL[status] : ((weekend||isHoliday) ? 'Weekend/holiday (default off)' : 'Work day (default)')));
         if(status==='OFF' && moved) tooltip = 'Weekend day moved here';
         else if(moved) tooltip += ' (moved)';
         if(isPast && !forPrint) tooltip += ' — past date, password required to change';
@@ -915,8 +946,9 @@
     const rec = getCell(year, month, day, empId);
     const curStatus = rec ? rec.status : (isOffDefault ? null : 'WORK');
     const curShift = rec ? rec.shift : null;
+    const curHalf = rec ? (rec.half || null) : null;
 
-    let idx = CYCLE.findIndex(c => c.status===curStatus && c.shift===curShift);
+    let idx = CYCLE.findIndex(c => c.status===curStatus && c.shift===curShift && (c.half||null)===curHalf);
     if(idx === -1) idx = isOffDefault ? -1 : 0; // weekend default (null) isn't in CYCLE; start fresh at WORK
     idx = (idx+1) % CYCLE.length;
     const next = CYCLE[idx];
@@ -925,7 +957,7 @@
     if(!isOffDefault && next.status==='WORK' && next.shift===null && !(rec&&rec.moved)){
       newRec = null;
     } else {
-      newRec = {status:next.status, shift:next.shift, moved: rec&&rec.moved || false};
+      newRec = {status:next.status, shift:next.shift, half: next.half||null, moved: rec&&rec.moved || false};
     }
     if(isPastDate(year, month, day)){
       const emp = state.employees.find(e=>e.id===empId);
@@ -1024,7 +1056,7 @@
       const emp = state.employees.find(e=>e.id===empId);
       for(let d=dayLo; d<=dayHi; d++){
         const prev = getCell(year, month, d, empId);
-        const next = cond.key==='RESET' ? null : {status:cond.status, shift:cond.shift, moved:false};
+        const next = cond.key==='RESET' ? null : {status:cond.status, shift:cond.shift, half: cond.half||null, moved:false};
         if(isPastDate(year, month, d)){
           archiveChange(year, {ts:new Date().toISOString(), month, day:d, empId, empName: emp?emp.name:empId, before:prev, after:next});
         }
