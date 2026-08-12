@@ -185,7 +185,7 @@
     <span id="moveHint">Click a weekend/holiday cell, then click the weekday to swap it with.</span>
     <span style="flex:1"></span>
     <button id="pdfBtn" class="primary">Prepare PDF (this + next month)</button>
-    <button id="emailBtn">Email employees</button>
+    <button id="emailBtn">Print &amp; email schedule</button>
     <button id="changePassBtn">Change password</button>
   </div>
 
@@ -219,9 +219,9 @@
 
 <div class="modal-backdrop" id="emailModalBackdrop">
   <div class="modal">
-    <h3>Send schedule to employees</h3>
-    <p class="note">This builds an email with all employee addresses in BCC and downloads a PDF of this month and next month. Your email app can't auto-attach files from a webpage, so please attach the downloaded PDF before sending.</p>
-    <button id="emailGoBtn">Download PDF &amp; open email</button>
+    <h3>Print &amp; email the schedule</h3>
+    <p class="note">This opens the print dialog for this month + next month (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as BCC), with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
+    <button id="emailGoBtn">Print PDF &amp; open email</button>
     <button id="emailCancelBtn">Cancel</button>
   </div>
 </div>
