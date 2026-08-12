@@ -79,7 +79,7 @@
 
   table.sched{border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:6px;}
   table.sched th, table.sched td{
-    border:1px solid var(--line);text-align:center;padding:0;font-size:11.5px;position:relative;
+    border:1px solid #000;text-align:center;padding:0;font-size:11.5px;position:relative;
     min-width:26px;height:26px;
   }
   table.sched th.emp, table.sched td.emp{
@@ -87,6 +87,7 @@
     background:var(--panel);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
   table.sched thead th{font-weight:600;color:var(--grey-strong);}
+  table.sched thead th.dow, table.sched thead th.datenum{color:#000;}
   .dow{background:var(--grey);color:#000;font-weight:700;}
   .datenum{background:var(--grey);font-weight:800;color:#000;}
   table.sched thead tr:last-child th{border-bottom:2px solid #000;}
@@ -209,10 +210,11 @@
     <button id="moveModeBtn">Move a weekend day</button>
     <span id="moveHint">Click a weekend/holiday cell, then click the weekday to swap it with.</span>
     <button id="rangeModeBtn">Select a range of days</button>
-    <span id="rangeHint">Click a day (for a single change) or a start and end day (for a range), then click a condition below to apply it.</span>
+    <span id="rangeHint">Click a day for a single change, or click two days (even in different employee rows) to select a block, then click a condition below to apply it to everyone in that block.</span>
     <span style="flex:1"></span>
     <button id="pdfBtn" class="primary">Prepare PDF (this + next month)</button>
     <button id="emailBtn">Print &amp; email schedule</button>
+    <button id="summaryBtn">Employee summary</button>
     <button id="changePassBtn">Change password</button>
   </div>
 
@@ -235,7 +237,7 @@
 
   <div class="panel note">
     Click any cell to quickly cycle it through: Work → Morning → Afternoon → Day off → Sick → Requested off → Unpaid → back to normal.
-    For bulk edits, click "Select a range of days," click the first and last day in an employee's row, then click a condition in the legend above to apply it to the whole range.
+    For bulk edits, click "Select a range of days," then click a single cell (or two cells — even across different employees) to select a block, then click a condition in the legend above to apply it to everyone in that block.
     Weekends and Alberta general holidays default to a day off (yellow) automatically. Days already in the past are tinted blue automatically.
     "Move a weekend day" swaps someone's weekend off with a weekday in the same week.
     Editing a day that's already passed asks for your password and logs the change. Removing an employee keeps them visible on past months they worked, but hides them from the current and future schedule.
@@ -253,6 +255,18 @@
     <input type="password" id="pastEditPass" placeholder="Password" autocomplete="off" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;">
     <button id="pastEditOkBtn">Confirm change</button>
     <button id="pastEditCancelBtn">Cancel</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="summaryModalBackdrop">
+  <div class="modal" style="max-width:420px;">
+    <h3>Employee summary</h3>
+    <div class="field" style="margin-bottom:12px;">
+      <label style="font-size:11px;color:var(--grey-strong);">Employee</label><br>
+      <select id="summaryEmpSelect" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:7px;font-size:13px;margin-top:4px;"></select>
+    </div>
+    <div id="summaryResults" style="font-size:13px;"></div>
+    <button id="summaryCloseBtn">Close</button>
   </div>
 </div>
 
@@ -626,6 +640,60 @@
     });
   }
 
+  const SUMMARY_COLUMNS = [
+    {key:'on',     label:'On'},
+    {key:'extra',  label:'Extra'},
+    {key:'off',    label:'Off'},
+    {key:'sick',   label:'Sick'},
+    {key:'req',    label:'Req'},
+    {key:'unpaid', label:'Unp'},
+  ];
+
+  // Tallies status counts for one employee across a day range within a single month.
+  function computeStatsForRange(empId, year, month, dayFrom, dayTo){
+    const holidays = albertaHolidays(year);
+    const totals = {on:0, extra:0, off:0, sick:0, req:0, unpaid:0};
+    for(let d=dayFrom; d<=dayTo; d++){
+      const dateObj = new Date(year, month, d);
+      const weekend = isWeekend(dateObj);
+      const hKey = fmtKey(dateObj);
+      const isHoliday = !!holidays[hKey];
+      const rec = getCell(year, month, d, empId);
+      const status = rec ? rec.status : ((weekend||isHoliday) ? null : 'WORK');
+      const moved = rec ? !!rec.moved : false;
+      if(status==='WORK'){ totals.on++; if(moved) totals.extra++; }
+      else if(status==='OFF'){ totals.off++; }
+      else if(status==='SICK'){ totals.sick++; }
+      else if(status==='REQ'){ totals.req++; }
+      else if(status==='UNPAID'){ totals.unpaid++; }
+    }
+    return totals;
+  }
+
+  function addTotals(a, b){
+    return {on:a.on+b.on, extra:a.extra+b.extra, off:a.off+b.off, sick:a.sick+b.sick, req:a.req+b.req, unpaid:a.unpaid+b.unpaid};
+  }
+
+  // Full-month totals for one employee.
+  async function computeMonthStats(empId, year, month){
+    await ensureYearLoaded(year);
+    return computeStatsForRange(empId, year, month, 1, daysInMonth(year, month));
+  }
+
+  // Jan 1 through today (or through Dec 31 for a past year) for one employee.
+  async function computeYTDStats(empId, year){
+    await ensureYearLoaded(year);
+    const realToday = new Date(); realToday.setHours(0,0,0,0);
+    const isCurrentYear = year === realToday.getFullYear();
+    const lastMonth = isCurrentYear ? realToday.getMonth() : 11;
+    let totals = {on:0, extra:0, off:0, sick:0, req:0, unpaid:0};
+    for(let m=0; m<=lastMonth; m++){
+      const lastDay = (isCurrentYear && m===lastMonth) ? realToday.getDate() : daysInMonth(year, m);
+      totals = addTotals(totals, computeStatsForRange(empId, year, m, 1, lastDay));
+    }
+    return totals;
+  }
+
   // ---------- rendering ----------
   function renderMonthNav(){
     const nav = document.getElementById('monthNav');
@@ -652,13 +720,27 @@
     nav.appendChild(nextBtn);
   }
 
+  function empIdsInMonthOrder(year, month){
+    return employeesForMonth(year, month).map(e=>e.id);
+  }
+
   function isInRange(year, month, day, empId){
     if(!rangeStart) return false;
-    if(rangeStart.year!==year || rangeStart.month!==month || rangeStart.empId!==empId) return false;
-    if(!rangeEnd) return day===rangeStart.day ? 'anchor' : false;
-    if(rangeEnd.year!==year || rangeEnd.month!==month || rangeEnd.empId!==empId) return false;
-    const lo = Math.min(rangeStart.day, rangeEnd.day), hi = Math.max(rangeStart.day, rangeEnd.day);
-    return (day>=lo && day<=hi) ? 'selected' : false;
+    if(rangeStart.year!==year || rangeStart.month!==month) return false;
+    if(!rangeEnd){
+      return (day===rangeStart.day && empId===rangeStart.empId) ? 'anchor' : false;
+    }
+    if(rangeEnd.year!==year || rangeEnd.month!==month) return false;
+
+    const dayLo = Math.min(rangeStart.day, rangeEnd.day), dayHi = Math.max(rangeStart.day, rangeEnd.day);
+    if(day<dayLo || day>dayHi) return false;
+
+    const list = empIdsInMonthOrder(year, month);
+    const idxA = list.indexOf(rangeStart.empId), idxB = list.indexOf(rangeEnd.empId);
+    const idxCur = list.indexOf(empId);
+    if(idxA===-1 || idxB===-1 || idxCur===-1) return false;
+    const idxLo = Math.min(idxA, idxB), idxHi = Math.max(idxA, idxB);
+    return (idxCur>=idxLo && idxCur<=idxHi) ? 'selected' : false;
   }
 
   function buildMonthTable(year, month, forPrint){
@@ -694,6 +776,22 @@
       if(isHoliday){ th2.title = holidays[hKey]; const m=document.createElement('span'); m.className='holiday-mark'; m.textContent='H'; th2.appendChild(m); }
       rowDate.appendChild(th2);
     }
+
+    if(!forPrint){
+      SUMMARY_COLUMNS.forEach(col=>{
+        const th = document.createElement('th');
+        th.className = 'dow';
+        th.style.borderLeft = '2px solid #000';
+        rowDow.appendChild(th);
+        const th2 = document.createElement('th');
+        th2.className = 'datenum';
+        th2.style.borderLeft = '2px solid #000';
+        th2.style.fontSize = '9px';
+        th2.textContent = col.label;
+        rowDate.appendChild(th2);
+      });
+    }
+
     thead.appendChild(rowDow); thead.appendChild(rowDate);
     table.appendChild(thead);
 
@@ -721,6 +819,8 @@
           td.classList.add((weekend || isHoliday) ? 'weekend' : 'work');
         } else if(status==='WORK'){
           td.classList.add('work');
+        } else if(status==='OFF' && moved){
+          td.classList.add('weekend'); // a weekend day moved here — should look like a weekend day off
         } else {
           td.classList.add(status);
         }
@@ -738,14 +838,15 @@
           badge.className = 'shift-badge shift-' + shift;
           badge.textContent = shift;
           td.appendChild(badge);
-        } else if(status && status!=='WORK'){
+        } else if(status && status!=='WORK' && !(status==='OFF' && moved)){
           const span = document.createElement('span'); span.className='code';
           span.textContent = status[0];
           td.appendChild(span);
         }
 
         let tooltip = shift ? SHIFT_LABEL[shift] : (status ? STATUS_LABEL[status] : ((weekend||isHoliday) ? 'Weekend/holiday (default off)' : 'Work day (default)'));
-        if(moved) tooltip += ' (moved)';
+        if(status==='OFF' && moved) tooltip = 'Weekend day moved here';
+        else if(moved) tooltip += ' (moved)';
         if(isPast && !forPrint) tooltip += ' — past date, password required to change';
         td.title = tooltip;
 
@@ -754,6 +855,19 @@
         }
         tr.appendChild(td);
       }
+
+      if(!forPrint){
+        const stats = computeStatsForRange(emp.id, year, month, 1, nDays);
+        SUMMARY_COLUMNS.forEach(col=>{
+          const td = document.createElement('td');
+          td.style.borderLeft = '2px solid #000';
+          td.style.fontWeight = '700';
+          td.style.fontSize = '11px';
+          td.textContent = stats[col.key];
+          tr.appendChild(td);
+        });
+      }
+
       tbody.appendChild(tr);
     });
 
@@ -766,7 +880,7 @@
       notesRow.appendChild(notesLabelTd);
 
       const notesTd = document.createElement('td');
-      notesTd.colSpan = nDays;
+      notesTd.colSpan = nDays + SUMMARY_COLUMNS.length;
       notesTd.style.textAlign = 'left';
       notesTd.style.borderTop = '2px solid #000';
       const key = year+'-'+month;
@@ -868,8 +982,8 @@
       renderAll();
       return;
     }
-    if(rangeStart.year!==year || rangeStart.month!==month || rangeStart.empId!==empId){
-      alert('Pick the end day within the same employee row and the same month as your first click. Starting over from this click.');
+    if(rangeStart.year!==year || rangeStart.month!==month){
+      alert('Pick the second click within the same month as your first click. Starting over from this click.');
       rangeStart = {year, month, day, empId};
       rangeEnd = null;
       renderAll();
@@ -885,29 +999,37 @@
       return;
     }
     if(!rangeStart){
-      alert('Click a day first — one day for a single change, or a start and end day for a range.');
+      alert('Click a day first — one cell for a single change, or two cells (possibly different employees) for a block.');
       return;
     }
     const cond = CONDITIONS.find(c=>c.key===condKey);
-    const {year, month, empId} = rangeStart;
+    const {year, month} = rangeStart;
     const endDay = rangeEnd ? rangeEnd.day : rangeStart.day;
-    const lo = Math.min(rangeStart.day, endDay), hi = Math.max(rangeStart.day, endDay);
+    const dayLo = Math.min(rangeStart.day, endDay), dayHi = Math.max(rangeStart.day, endDay);
+
+    const list = empIdsInMonthOrder(year, month);
+    const idxA = list.indexOf(rangeStart.empId);
+    const idxB = rangeEnd ? list.indexOf(rangeEnd.empId) : idxA;
+    const idxLo = Math.min(idxA, idxB), idxHi = Math.max(idxA, idxB);
+    const empIds = list.slice(idxLo, idxHi+1);
 
     let anyPast = false;
-    for(let d=lo; d<=hi; d++){ if(isPastDate(year, month, d)){ anyPast = true; break; } }
+    for(let d=dayLo; d<=dayHi; d++){ if(isPastDate(year, month, d)){ anyPast = true; break; } }
     if(anyPast){
       const ok = await requestPastEditPassword();
       if(!ok) return;
     }
 
-    const emp = state.employees.find(e=>e.id===empId);
-    for(let d=lo; d<=hi; d++){
-      const prev = getCell(year, month, d, empId);
-      const next = cond.key==='RESET' ? null : {status:cond.status, shift:cond.shift, moved:false};
-      if(isPastDate(year, month, d)){
-        archiveChange(year, {ts:new Date().toISOString(), month, day:d, empId, empName: emp?emp.name:empId, before:prev, after:next});
+    for(const empId of empIds){
+      const emp = state.employees.find(e=>e.id===empId);
+      for(let d=dayLo; d<=dayHi; d++){
+        const prev = getCell(year, month, d, empId);
+        const next = cond.key==='RESET' ? null : {status:cond.status, shift:cond.shift, moved:false};
+        if(isPastDate(year, month, d)){
+          archiveChange(year, {ts:new Date().toISOString(), month, day:d, empId, empName: emp?emp.name:empId, before:prev, after:next});
+        }
+        setCell(year, month, d, empId, next);
       }
-      setCell(year, month, d, empId, next);
     }
     rangeStart = null; rangeEnd = null;
     renderAll();
@@ -1102,6 +1224,45 @@
     buildPrintArea();
     window.print();
   };
+
+  const summaryBackdrop = document.getElementById('summaryModalBackdrop');
+  const summarySelect = document.getElementById('summaryEmpSelect');
+  document.getElementById('summaryBtn').onclick = async ()=>{
+    summarySelect.innerHTML = '';
+    state.employees.forEach(emp=>{
+      const opt = document.createElement('option');
+      opt.value = emp.id;
+      opt.textContent = emp.name + (emp.active===false ? ' (removed)' : '');
+      summarySelect.appendChild(opt);
+    });
+    summaryBackdrop.classList.add('show');
+    await renderSummaryResults();
+  };
+  document.getElementById('summaryCloseBtn').onclick = ()=>{ summaryBackdrop.classList.remove('show'); };
+  summarySelect.onchange = renderSummaryResults;
+
+  async function renderSummaryResults(){
+    const empId = summarySelect.value;
+    const emp = state.employees.find(e=>e.id===empId);
+    const results = document.getElementById('summaryResults');
+    if(!emp){ results.innerHTML = ''; return; }
+    results.innerHTML = '<p class="note">Loading…</p>';
+
+    const monthStats = await computeMonthStats(empId, currentYear, currentMonth);
+    const ytdStats = await computeYTDStats(empId, currentYear);
+
+    function table(title, stats){
+      let rows = SUMMARY_COLUMNS.map(col=>
+        '<tr><td style="padding:3px 8px 3px 0;">' + col.label + (col.key==='extra' ? ' (worked a moved weekend day)' : '') + '</td>' +
+        '<td style="padding:3px 0;font-weight:700;text-align:right;">' + stats[col.key] + '</td></tr>'
+      ).join('');
+      return '<h4 style="margin:14px 0 4px;">' + title + '</h4><table style="width:100%;border-collapse:collapse;">' + rows + '</table>';
+    }
+
+    results.innerHTML =
+      table(MONTHS[currentMonth] + ' ' + currentYear, monthStats) +
+      table('Year to date (' + currentYear + ')', ytdStats);
+  }
 
   const emailBackdrop = document.getElementById('emailModalBackdrop');
   document.getElementById('emailBtn').onclick = ()=>{ emailBackdrop.classList.add('show'); };
