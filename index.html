@@ -80,18 +80,16 @@
   table.sched{border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:6px;}
   table.sched th, table.sched td{
     border:1px solid var(--line);text-align:center;padding:0;font-size:11.5px;position:relative;
-    min-width:24px;height:24px;
+    min-width:26px;height:26px;
   }
   table.sched th.emp, table.sched td.emp{
     text-align:left;padding:4px 8px;font-weight:600;font-size:12.5px;min-width:100px;width:110px;
     background:var(--panel);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
   table.sched thead th{font-weight:600;color:var(--grey-strong);}
-  .dow{background:var(--green);}
-  .dow.weekend{background:var(--yellow);}
-  .datenum{background:var(--green);font-weight:700;}
-  .datenum.weekend{background:var(--yellow);}
-  .datenum.holiday{background:var(--yellow);}
+  .dow{background:var(--grey);color:#000;font-weight:700;}
+  .datenum{background:var(--grey);font-weight:800;color:#000;}
+  table.sched thead tr:last-child th{border-bottom:2px solid #000;}
   .past::after{
     content:"";position:absolute;inset:0;background:var(--blue-past);pointer-events:none;
   }
@@ -114,8 +112,9 @@
   td.cell.selectable-target{background:#eafaf0 !important; box-shadow: inset 0 0 0 2px var(--green-strong);}
   td.cell span.code{font-weight:700;font-size:10px;color:#2a2a2a;position:relative;z-index:2;}
   .shift-badge{
-    position:absolute;top:1px;left:1px;width:11px;height:11px;border-radius:50%;
-    font-size:8px;font-weight:800;color:#fff;line-height:11px;text-align:center;z-index:2;
+    position:absolute;top:0px;left:0px;width:16px;height:16px;border-radius:50%;
+    font-size:11px;font-weight:800;color:#fff;line-height:16px;text-align:center;z-index:2;
+    box-shadow:0 0 0 1px rgba(255,255,255,.6);
   }
   .shift-badge.shift-M{background:var(--morning);}
   .shift-badge.shift-A{background:var(--afternoon);}
@@ -210,7 +209,7 @@
     <button id="moveModeBtn">Move a weekend day</button>
     <span id="moveHint">Click a weekend/holiday cell, then click the weekday to swap it with.</span>
     <button id="rangeModeBtn">Select a range of days</button>
-    <span id="rangeHint">Click the first day, then the last day (same employee row), then click a condition below to apply it.</span>
+    <span id="rangeHint">Click a day (for a single change) or a start and end day (for a range), then click a condition below to apply it.</span>
     <span style="flex:1"></span>
     <button id="pdfBtn" class="primary">Prepare PDF (this + next month)</button>
     <button id="emailBtn">Print &amp; email schedule</button>
@@ -455,7 +454,8 @@
   let state = {
     company: "Work Schedule",
     employees: [], // {id,name,email}
-    schedules: {}  // year -> { "m-d-empId": {status, shift, moved} }
+    schedules: {}, // year -> { "m-d-empId": {status, shift, moved} }
+    notes: {}      // "year-month" -> free-text string, not printed
   };
   let currentYear = today.getFullYear();
   let currentMonth = today.getMonth();
@@ -524,6 +524,16 @@
       state.schedules[year] = sc ? migrateYearData(JSON.parse(sc)) : {};
     }catch(e){
       state.schedules[year] = {};
+    }
+  }
+  async function ensureNotesLoaded(year, month){
+    const key = year+'-'+month;
+    if(state.notes[key] !== undefined) return;
+    try{
+      const raw = await storageGet('notes:'+key, true);
+      state.notes[key] = raw || '';
+    }catch(e){
+      state.notes[key] = '';
     }
   }
 
@@ -746,6 +756,31 @@
       }
       tbody.appendChild(tr);
     });
+
+    if(!forPrint){
+      const notesRow = document.createElement('tr');
+      const notesLabelTd = document.createElement('td');
+      notesLabelTd.className = 'emp';
+      notesLabelTd.textContent = 'NOTES:';
+      notesLabelTd.style.borderTop = '2px solid #000';
+      notesRow.appendChild(notesLabelTd);
+
+      const notesTd = document.createElement('td');
+      notesTd.colSpan = nDays;
+      notesTd.style.textAlign = 'left';
+      notesTd.style.borderTop = '2px solid #000';
+      const key = year+'-'+month;
+      const textarea = document.createElement('textarea');
+      textarea.value = state.notes[key] || '';
+      textarea.placeholder = 'Notes for this month (not printed)…';
+      textarea.style.cssText = 'width:100%;min-height:30px;border:none;resize:vertical;font-family:inherit;font-size:12px;padding:4px 6px;background:transparent;';
+      textarea.oninput = ()=>{ state.notes[key] = textarea.value; };
+      textarea.onblur = ()=>{ storageSet('notes:'+key, textarea.value, true); };
+      notesTd.appendChild(textarea);
+      notesRow.appendChild(notesTd);
+      tbody.appendChild(notesRow);
+    }
+
     table.appendChild(tbody);
     return table;
   }
@@ -846,16 +881,17 @@
 
   async function applyConditionToRange(condKey){
     if(!rangeMode){
-      alert('Turn on "Select a range of days" first, then click the start and end day.');
+      alert('Turn on "Select a range of days" first, then click a day (or a start and end day).');
       return;
     }
-    if(!rangeStart || !rangeEnd){
-      alert('Click a start day and an end day (same employee row) before choosing a condition.');
+    if(!rangeStart){
+      alert('Click a day first — one day for a single change, or a start and end day for a range.');
       return;
     }
     const cond = CONDITIONS.find(c=>c.key===condKey);
     const {year, month, empId} = rangeStart;
-    const lo = Math.min(rangeStart.day, rangeEnd.day), hi = Math.max(rangeStart.day, rangeEnd.day);
+    const endDay = rangeEnd ? rangeEnd.day : rangeStart.day;
+    const lo = Math.min(rangeStart.day, endDay), hi = Math.max(rangeStart.day, endDay);
 
     let anyPast = false;
     for(let d=lo; d<=hi; d++){ if(isPastDate(year, month, d)){ anyPast = true; break; } }
@@ -973,6 +1009,7 @@
     const monthsToShow = [0,1,2].map(off=>monthOffset(currentYear,currentMonth,off));
     const years = Array.from(new Set(monthsToShow.map(m=>m.year)));
     await Promise.all(years.map(y=>ensureYearLoaded(y)));
+    await Promise.all(monthsToShow.map(m=>ensureNotesLoaded(m.year, m.month)));
 
     renderMonthNav();
     document.getElementById('yearInput').value = currentYear;
