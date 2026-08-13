@@ -22,6 +22,8 @@
     --red-strong:#b0281e;
     --skyblue:#3fc1f0;
     --skyblue-strong:#0d6f96;
+    --vacation:#4d7ef0;
+    --vacation-strong:#2a4fb8;
     --grey:#cfcabe;
     --grey-strong:#6b6558;
     --accent:#c05a2c;
@@ -103,17 +105,19 @@
   td.cell.work{background:var(--green);}
   td.cell.OFF{background:var(--red);}
   td.cell.SICK{background:var(--skyblue);}
+  td.cell.VAC{background:var(--vacation);}
   td.cell.REQ{background:var(--grey);}
   td.cell.UNPAID{
-    background:repeating-linear-gradient(45deg, var(--panel), var(--panel) 4px, #b8b2a2 4px, #b8b2a2 8px);
+    background:repeating-linear-gradient(45deg, var(--red), var(--red) 4px, #ffffff 4px, #ffffff 8px);
   }
   .swatch.weekend{background:var(--yellow);}
   .swatch.work{background:var(--green);}
   .swatch.OFF{background:var(--red);}
   .swatch.SICK{background:var(--skyblue);}
+  .swatch.VAC{background:var(--vacation);}
   .swatch.REQ{background:var(--grey);}
   .swatch.UNPAID{
-    background:repeating-linear-gradient(45deg, var(--panel), var(--panel) 3px, #b8b2a2 3px, #b8b2a2 6px);
+    background:repeating-linear-gradient(45deg, var(--red), var(--red) 3px, #ffffff 3px, #ffffff 6px);
   }
   td.cell.moved{box-shadow: inset 0 0 0 2px #2a2a2a; }
   td.cell.move-anchor{box-shadow: inset 0 0 0 3px var(--accent);}
@@ -237,6 +241,7 @@
     <div class="emp-manager">
       <div class="field"><label>Name</label><input id="newEmpName" placeholder="e.g. Randy"></div>
       <div class="field"><label>Email</label><input id="newEmpEmail" placeholder="name@company.com"></div>
+      <div class="field"><label>Start date (optional)</label><input id="newEmpStart" type="date"></div>
       <button id="addEmpBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--line);cursor:pointer;">Add</button>
     </div>
     <div class="emp-list" id="empList"></div>
@@ -302,18 +307,19 @@
   // condition key -> {status, shift} used for both quick-cycle and bulk range apply.
   // "RESET" is special: clears the override entirely, reverting to the automatic default.
   const CONDITIONS = [
-    {key:'RESET',  label:'Weekend / Alberta holiday (default off)', swatch:'weekend'},
+    {key:'RESET',  label:'Weekend / Stat', swatch:'weekend'},
     {key:'WORK',   label:'Work day',            status:'WORK', shift:null, swatch:'work'},
     {key:'M',      label:'Morning shift',       status:'WORK', shift:'M',  swatch:'work', badge:'M'},
     {key:'A',      label:'Afternoon shift',     status:'WORK', shift:'A',  swatch:'work', badge:'A'},
     {key:'OFF',    label:'Day off',             status:'OFF',  shift:null, swatch:'OFF'},
+    {key:'VAC',    label:'Vacation',            status:'VAC',  shift:null, swatch:'VAC'},
     {key:'SICK',   label:'Sick day',            status:'SICK', shift:null, swatch:'SICK'},
     {key:'HALF_OFF',  label:'Half day off',  status:'HALF', shift:null, half:'OFF',  swatch:'half-off'},
     {key:'HALF_SICK', label:'Half day sick', status:'HALF', shift:null, half:'SICK', swatch:'half-sick'},
     {key:'REQ',    label:'Requested day off',   status:'REQ',  shift:null, swatch:'REQ'},
     {key:'UNPAID', label:'Unpaid day off',      status:'UNPAID', shift:null, swatch:'UNPAID'},
   ];
-  const STATUS_LABEL = {WORK:'Work day', OFF:'Day off', SICK:'Sick day', REQ:'Requested day off', UNPAID:'Unpaid day off'};
+  const STATUS_LABEL = {WORK:'Work day', OFF:'Day off', VAC:'Vacation', SICK:'Sick day', REQ:'Requested day off', UNPAID:'Unpaid day off'};
   const SHIFT_LABEL = {M:'Morning shift', A:'Afternoon shift'};
   // quick single-click cycle order (composite status|shift|half)
   const CYCLE = [
@@ -321,6 +327,7 @@
     {status:'WORK', shift:'M', half:null},
     {status:'WORK', shift:'A', half:null},
     {status:'OFF', shift:null, half:null},
+    {status:'VAC', shift:null, half:null},
     {status:'SICK', shift:null, half:null},
     {status:'HALF', shift:null, half:'OFF'},
     {status:'HALF', shift:null, half:'SICK'},
@@ -652,6 +659,7 @@
   function employeesForMonth(year, month){
     const monthEnd = new Date(year, month+1, 0);
     return state.employees.filter(e=>{
+      if(e.hiredDate && monthEnd < new Date(e.hiredDate)) return false; // this month ended before they were hired
       if(e.active !== false) return true; // active (or legacy record with no flag) -> always show
       if(e.removedDate){
         return monthEnd <= new Date(e.removedDate); // this month ended on/before removal -> they existed then
@@ -664,6 +672,7 @@
     {key:'extra',  label:'Extra'},
     {key:'on',     label:'On'},
     {key:'off',    label:'Off'},
+    {key:'vac',    label:'Vac'},
     {key:'sick',   label:'Sick'},
     {key:'unpaid', label:'Unp'},
   ];
@@ -671,7 +680,7 @@
   // Tallies status counts for one employee across a day range within a single month.
   function computeStatsForRange(empId, year, month, dayFrom, dayTo){
     const holidays = albertaHolidays(year);
-    const totals = {on:0, extra:0, off:0, sick:0, req:0, unpaid:0};
+    const totals = {on:0, extra:0, off:0, vac:0, sick:0, req:0, unpaid:0};
     for(let d=dayFrom; d<=dayTo; d++){
       const dateObj = new Date(year, month, d);
       const weekend = isWeekend(dateObj);
@@ -683,6 +692,7 @@
       const moved = rec ? !!rec.moved : false;
       if(status==='WORK'){ totals.on++; if(moved) totals.extra++; }
       else if(status==='OFF'){ totals.off++; }
+      else if(status==='VAC'){ totals.vac++; }
       else if(status==='SICK'){ totals.sick++; }
       else if(status==='REQ'){ totals.req++; }
       else if(status==='UNPAID'){ totals.unpaid++; }
@@ -695,7 +705,7 @@
   }
 
   function addTotals(a, b){
-    return {on:a.on+b.on, extra:a.extra+b.extra, off:a.off+b.off, sick:a.sick+b.sick, req:a.req+b.req, unpaid:a.unpaid+b.unpaid};
+    return {on:a.on+b.on, extra:a.extra+b.extra, off:a.off+b.off, vac:a.vac+b.vac, sick:a.sick+b.sick, req:a.req+b.req, unpaid:a.unpaid+b.unpaid};
   }
 
   // Full-month totals for one employee.
@@ -1101,7 +1111,7 @@
     past.className = 'info';
     const sw2 = document.createElement('span');
     sw2.className='swatch'; sw2.style.background='var(--blue-past-strong)';
-    past.appendChild(sw2); past.appendChild(document.createTextNode('Already passed (auto)'));
+    past.appendChild(sw2); past.appendChild(document.createTextNode('Past days'));
     el.appendChild(past);
   }
 
@@ -1132,6 +1142,11 @@
         emailInput.value = emp.email || '';
         emailInput.placeholder = 'name@company.com';
         emailInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;flex:1;';
+        const startInput = document.createElement('input');
+        startInput.type = 'date';
+        startInput.value = emp.hiredDate || '';
+        startInput.title = 'Start date (optional)';
+        startInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;';
         const saveBtn = document.createElement('button');
         saveBtn.textContent = 'Save'; saveBtn.style.color = 'var(--green-strong)';
         saveBtn.onclick = ()=>{
@@ -1139,6 +1154,7 @@
           if(!newName){ alert('Name can\'t be empty.'); return; }
           emp.name = newName;
           emp.email = emailInput.value.trim();
+          emp.hiredDate = startInput.value || null;
           editingEmpId = null;
           saveEmployees();
           renderAll();
@@ -1147,10 +1163,11 @@
         cancelBtn.textContent = 'Cancel';
         cancelBtn.onclick = ()=>{ editingEmpId = null; renderAll(); };
 
-        row.appendChild(nameInput); row.appendChild(emailInput); row.appendChild(saveBtn); row.appendChild(cancelBtn);
+        row.appendChild(nameInput); row.appendChild(emailInput); row.appendChild(startInput); row.appendChild(saveBtn); row.appendChild(cancelBtn);
       } else {
         const name = document.createElement('span'); name.className='name'; name.textContent = emp.name;
-        const email = document.createElement('span'); email.className='email'; email.textContent = emp.email || '(no email)';
+        const email = document.createElement('span'); email.className='email';
+        email.textContent = (emp.email || '(no email)') + (emp.hiredDate ? (' — starts ' + emp.hiredDate) : '');
         const edit = document.createElement('button'); edit.textContent='Edit'; edit.style.color = 'var(--blue-past-strong)';
         edit.onclick = ()=>{ editingEmpId = emp.id; renderAll(); };
         const del = document.createElement('button'); del.textContent='Remove';
@@ -1240,10 +1257,12 @@
   document.getElementById('addEmpBtn').onclick = ()=>{
     const name = document.getElementById('newEmpName').value.trim();
     const email = document.getElementById('newEmpEmail').value.trim();
+    const startDate = document.getElementById('newEmpStart').value; // yyyy-mm-dd or ''
     if(!name) return;
-    state.employees.push({id:'e'+Date.now(), name, email, active:true});
+    state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null});
     document.getElementById('newEmpName').value='';
     document.getElementById('newEmpEmail').value='';
+    document.getElementById('newEmpStart').value='';
     saveEmployees();
     renderAll();
   };
