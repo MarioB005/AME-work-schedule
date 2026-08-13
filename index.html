@@ -1140,6 +1140,8 @@
     renderAll();
   }
 
+  let didInitialScroll = false;
+
   async function renderAll(){
     const monthsToShow = [];
     for(let m=0; m<12; m++) monthsToShow.push({year:currentYear, month:m});
@@ -1157,6 +1159,7 @@
     monthsToShow.forEach(m=>{
       const block = document.createElement('div');
       block.className = 'month-block';
+      block.id = 'month-' + m.year + '-' + m.month;
       const h3 = document.createElement('h3');
       h3.textContent = MONTHS[m.month] + ' ' + m.year;
       block.appendChild(h3);
@@ -1166,6 +1169,21 @@
 
     renderLegend();
     renderEmployeeList();
+
+    if(!didInitialScroll){
+      didInitialScroll = true;
+      const realToday = new Date();
+      const targetId = 'month-' + realToday.getFullYear() + '-' + realToday.getMonth();
+      setTimeout(()=>{
+        const el = document.getElementById(targetId);
+        const sticky = document.getElementById('stickyTop');
+        if(el){
+          const stickyHeight = sticky ? sticky.offsetHeight : 0;
+          const top = el.getBoundingClientRect().top + window.scrollY - stickyHeight - 12;
+          window.scrollTo({ top: Math.max(top, 0), behavior: 'auto' });
+        }
+      }, 30);
+    }
   }
 
   // ---------- controls ----------
