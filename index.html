@@ -307,8 +307,7 @@
   // condition key -> {status, shift} used for both quick-cycle and bulk range apply.
   // "RESET" is special: clears the override entirely, reverting to the automatic default.
   const CONDITIONS = [
-    {key:'RESET',  label:'Weekend / Stat', swatch:'weekend'},
-    {key:'MARK_STAT', label:'Mark as Weekend / Stat', status:'OFF', shift:null, moved:true, swatch:'weekend'},
+    {key:'STAT',  label:'Weekend / Stat', status:'STAT', shift:null, swatch:'weekend'},
     {key:'WORK',   label:'Work day',            status:'WORK', shift:null, swatch:'work'},
     {key:'M',      label:'Morning shift',       status:'WORK', shift:'M',  swatch:'work', badge:'M'},
     {key:'A',      label:'Afternoon shift',     status:'WORK', shift:'A',  swatch:'work', badge:'A'},
@@ -320,7 +319,7 @@
     {key:'REQ',    label:'Requested day off',   status:'REQ',  shift:null, swatch:'REQ'},
     {key:'UNPAID', label:'Unpaid day off',      status:'UNPAID', shift:null, swatch:'UNPAID'},
   ];
-  const STATUS_LABEL = {WORK:'Work day', OFF:'Day off', VAC:'Vacation', SICK:'Sick day', REQ:'Requested day off', UNPAID:'Unpaid day off'};
+  const STATUS_LABEL = {WORK:'Work day', OFF:'Day off', VAC:'Vacation', SICK:'Sick day', REQ:'Requested day off', UNPAID:'Unpaid day off', STAT:'Weekend / Stat'};
   const SHIFT_LABEL = {M:'Morning shift', A:'Afternoon shift'};
   // quick single-click cycle order (composite status|shift|half)
   const CYCLE = [
@@ -861,6 +860,8 @@
           td.classList.add((weekend || isHoliday) ? 'weekend' : 'work');
         } else if(status==='WORK'){
           td.classList.add('work');
+        } else if(status==='STAT'){
+          td.classList.add('weekend'); // explicitly marked to look/behave like a weekend or stat day off
         } else if(status==='OFF' && moved){
           td.classList.add('weekend'); // a weekend day moved here — should look like a weekend day off
         } else if(status==='HALF'){
@@ -890,7 +891,7 @@
           badge.className = 'half-badge';
           badge.textContent = half==='SICK' ? 'S' : 'O';
           td.appendChild(badge);
-        } else if(status && status!=='WORK' && !(status==='OFF' && moved)){
+        } else if(status && status!=='WORK' && status!=='STAT' && !(status==='OFF' && moved)){
           const span = document.createElement('span'); span.className='code';
           span.textContent = status[0];
           td.appendChild(span);
