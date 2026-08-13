@@ -137,7 +137,6 @@
   td.cell.REQ{background:var(--grey);}
   td.cell.UNPAID{
     background-color: var(--red);
-    background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, #ffffff 4px, #ffffff 8px);
   }
   .swatch.weekend{background:var(--yellow);}
   .swatch.work{background:var(--green);}
@@ -147,7 +146,6 @@
   .swatch.REQ{background:var(--grey);}
   .swatch.UNPAID{
     background-color: var(--red);
-    background-image: repeating-linear-gradient(45deg, transparent, transparent 3px, #ffffff 3px, #ffffff 6px);
   }
   td.cell.range-anchor{box-shadow: inset 0 0 0 2px var(--ink);}
   td.cell.range-selected{box-shadow: inset 0 0 0 2px var(--ink); filter:brightness(0.92);}
@@ -211,7 +209,6 @@
     }
     td.cell.UNPAID{
       background-color: var(--red) !important;
-      background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, #ffffff 4px, #ffffff 8px) !important;
     }
     #printArea table.sched th, #printArea table.sched td{
       border: 2px solid #000 !important;
@@ -279,7 +276,6 @@
     </div>
 
     <div class="toolbar">
-      <button id="rangeModeBtn">Select a range of days</button>
       <span style="flex:1"></span>
       <button id="pdfBtn" class="primary">Prepare PDF (this + next month)</button>
       <button id="emailBtn">Print &amp; email schedule</button>
@@ -306,11 +302,10 @@
   </div>
 
   <div class="panel note">
-    Click any cell to quickly cycle it through: Work → Morning → Afternoon → Day off → Sick → Requested off → Unpaid → back to normal.
-    For bulk edits, click "Select a range of days," then click a single cell (or two cells — even across different employees) to select a block, then click a condition in the legend above to apply it to everyone in that block.
+    Click a day to select it, or click a second day (even in a different employee's row) to select a block, then click a condition in the legend above to apply it. Click the same lone cell again to cancel a selection.
     Weekends and Alberta general holidays default to a day off (yellow) automatically. Days already in the past are tinted blue automatically.
     To swap someone's weekend for a weekday off — e.g. have them work Saturday and take Monday off instead — select the weekend day and apply "Work day," then select the weekday and apply "Weekend / Stat."
-    Editing a day that's already passed asks for your password and logs the change. Removing an employee keeps them visible on past months they worked, but hides them from the current and future schedule.
+    Applying a condition to a day that's already passed asks for your password and logs the change. Removing an employee keeps them visible on past months they worked, but hides them from the current and future schedule.
   </div>
 
 </div>
@@ -381,29 +376,14 @@
     {key:'WORK',   label:'Work day',            status:'WORK', shift:null, swatch:'work'},
     {key:'M',      label:'Morning shift',       status:'WORK', shift:'M',  swatch:'work', badge:'M'},
     {key:'A',      label:'Afternoon shift',     status:'WORK', shift:'A',  swatch:'work', badge:'A'},
-    {key:'OFF',    label:'Day off',             status:'OFF',  shift:null, swatch:'OFF'},
     {key:'VAC',    label:'Vacation',            status:'VAC',  shift:null, swatch:'VAC'},
     {key:'SICK',   label:'Sick day',            status:'SICK', shift:null, swatch:'SICK'},
-    {key:'HALF_OFF',  label:'Half day off',  status:'HALF', shift:null, half:'OFF',  swatch:'half-off'},
     {key:'HALF_SICK', label:'Half day sick', status:'HALF', shift:null, half:'SICK', swatch:'half-sick'},
-    {key:'REQ',    label:'Requested day off',   status:'REQ',  shift:null, swatch:'REQ'},
     {key:'UNPAID', label:'Unpaid day off',      status:'UNPAID', shift:null, swatch:'UNPAID'},
+    {key:'HALF_OFF',  label:'Half day off',  status:'HALF', shift:null, half:'OFF',  swatch:'half-off'},
   ];
   const STATUS_LABEL = {WORK:'Work day', OFF:'Day off', VAC:'Vacation', SICK:'Sick day', REQ:'Requested day off', UNPAID:'Unpaid day off', STAT:'Weekend / Stat'};
   const SHIFT_LABEL = {M:'Morning shift', A:'Afternoon shift'};
-  // quick single-click cycle order (composite status|shift|half)
-  const CYCLE = [
-    {status:'WORK', shift:null, half:null},
-    {status:'WORK', shift:'M', half:null},
-    {status:'WORK', shift:'A', half:null},
-    {status:'OFF', shift:null, half:null},
-    {status:'VAC', shift:null, half:null},
-    {status:'SICK', shift:null, half:null},
-    {status:'HALF', shift:null, half:'OFF'},
-    {status:'HALF', shift:null, half:'SICK'},
-    {status:'REQ', shift:null, half:null},
-    {status:'UNPAID', shift:null, half:null},
-  ];
 
   // ---------- storage: Supabase (free hosted database) with localStorage as an offline cache ----------
   const SUPABASE_URL = 'https://frlehxadkvgwzyxovwua.supabase.co';
@@ -569,7 +549,6 @@
   };
   let currentYear = today.getFullYear();
   let currentMonth = today.getMonth();
-  let rangeMode = false;
   let rangeStart = null; // {year,month,day,empId}
   let rangeEnd = null;   // {year,month,day,empId}
   let editingEmpId = null;
@@ -994,40 +973,13 @@
     return table;
   }
 
-  async function handleCellClick(year, month, day, empId, isOffDefault){
-    if(rangeMode){
-      handleRangeClick(year, month, day, empId);
+  function handleCellClick(year, month, day, empId, isOffDefault){
+    if(rangeStart && !rangeEnd && rangeStart.year===year && rangeStart.month===month && rangeStart.day===day && rangeStart.empId===empId){
+      // clicking the sole selected cell again clears the selection
+      rangeStart = null;
+      renderAll();
       return;
     }
-    if(isPastDate(year, month, day)){
-      const ok = await requestPastEditPassword();
-      if(!ok) return;
-    }
-    const rec = getCell(year, month, day, empId);
-    const curStatus = rec ? rec.status : (isOffDefault ? null : 'WORK');
-    const curShift = rec ? rec.shift : null;
-    const curHalf = rec ? (rec.half || null) : null;
-
-    let idx = CYCLE.findIndex(c => c.status===curStatus && c.shift===curShift && (c.half||null)===curHalf);
-    if(idx === -1) idx = isOffDefault ? -1 : 0; // weekend default (null) isn't in CYCLE; start fresh at WORK
-    idx = (idx+1) % CYCLE.length;
-    const next = CYCLE[idx];
-
-    let newRec;
-    if(!isOffDefault && next.status==='WORK' && next.shift===null && !(rec&&rec.moved)){
-      newRec = null;
-    } else {
-      newRec = {status:next.status, shift:next.shift, half: next.half||null, moved: rec&&rec.moved || false};
-    }
-    if(isPastDate(year, month, day)){
-      const emp = state.employees.find(e=>e.id===empId);
-      archiveChange(year, {ts:new Date().toISOString(), month, day, empId, empName: emp?emp.name:empId, before:rec, after:newRec});
-    }
-    setCell(year, month, day, empId, newRec);
-    renderAll();
-  }
-
-  function handleRangeClick(year, month, day, empId){
     if(!rangeStart){
       rangeStart = {year, month, day, empId};
       rangeEnd = null;
@@ -1046,10 +998,6 @@
   }
 
   async function applyConditionToRange(condKey){
-    if(!rangeMode){
-      alert('Turn on "Select a range of days" first, then click a day (or a start and end day).');
-      return;
-    }
     if(!rangeStart){
       alert('Click a day first — one cell for a single change, or two cells (possibly different employees) for a block.');
       return;
@@ -1105,12 +1053,6 @@
       btn.onclick = ()=> applyConditionToRange(cond.key);
       el.appendChild(btn);
     });
-    const past = document.createElement('button');
-    past.className = 'info';
-    const sw2 = document.createElement('span');
-    sw2.className='swatch'; sw2.style.background='var(--blue-past-strong)';
-    past.appendChild(sw2); past.appendChild(document.createTextNode('Past days'));
-    el.appendChild(past);
   }
 
   function renderEmployeeList(){
@@ -1284,13 +1226,6 @@
     document.getElementById('newEmpEmail').value='';
     document.getElementById('newEmpStart').value='';
     saveEmployees();
-    renderAll();
-  };
-
-  document.getElementById('rangeModeBtn').onclick = ()=>{
-    rangeMode = !rangeMode;
-    rangeStart = null; rangeEnd = null;
-    document.getElementById('rangeModeBtn').classList.toggle('active-mode', rangeMode);
     renderAll();
   };
 
