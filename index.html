@@ -69,7 +69,6 @@
   }
   .toolbar button.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
   .toolbar button.active-mode{background:var(--blue-past-strong);color:#fff;border-color:var(--blue-past-strong);}
-  #rangeHint{font-size:12.5px;color:var(--blue-past-strong);font-weight:600;display:none;}
 
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:18px;}
 
@@ -223,7 +222,6 @@
     <div class="toolbar">
       <button id="addEmpToggle">+ Employee</button>
       <button id="rangeModeBtn">Select a range of days</button>
-      <span id="rangeHint">Click a day for a single change, or click two days (even in different employee rows) to select a block, then click a condition below to apply it to everyone in that block.</span>
       <span style="flex:1"></span>
       <button id="pdfBtn" class="primary">Prepare PDF (this + next month)</button>
       <button id="emailBtn">Print &amp; email schedule</button>
@@ -1215,7 +1213,6 @@
     rangeMode = !rangeMode;
     rangeStart = null; rangeEnd = null;
     document.getElementById('rangeModeBtn').classList.toggle('active-mode', rangeMode);
-    document.getElementById('rangeHint').style.display = rangeMode ? 'inline':'none';
     renderAll();
   };
 
