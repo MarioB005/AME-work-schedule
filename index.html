@@ -41,15 +41,19 @@
 
   #stickyTop{
     position: sticky; top: 0; z-index: 30; background: var(--paper);
-    padding-top: 0; padding-bottom: 4px; border-bottom: 2px solid var(--ink);
+    padding-top: 0; padding-bottom: 4px;
   }
   .dark-banner{
     background:#12172b; color:#fff; display:flex; align-items:center; justify-content:space-between;
-    padding:10px 20px; position:relative;
+    padding:10px 20px; position:relative; border-bottom: 2px solid var(--ink);
   }
-  .db-left{display:flex; align-items:center; gap:10px;}
+  .db-left{display:flex; align-items:center; gap:10px; min-width:0;}
   .db-icon{font-size:20px;}
-  .db-title{font-weight:800; font-size:16px; letter-spacing:.3px; color:#fff;}
+  .db-title-input{
+    font-weight:800; font-size:16px; letter-spacing:.3px; color:#fff;
+    background:transparent; border:none; border-bottom:2px dashed transparent; padding:2px 0; max-width:280px;
+  }
+  .db-title-input:hover, .db-title-input:focus{border-bottom-color:rgba(255,255,255,.4); outline:none;}
   .db-right{display:flex; align-items:center; gap:14px;}
   .db-icon-btn{
     background:transparent; border:1px solid rgba(255,255,255,.25); color:#fff; width:34px; height:34px;
@@ -77,15 +81,6 @@
   }
   .db-dropdown button:last-child{border-bottom:none;}
   .db-dropdown button:hover{background:var(--paper);}
-  header.top{
-    display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;
-    border-bottom:2px solid var(--ink);padding:14px 20px;margin-bottom:16px;
-  }
-  header.top input.company{
-    font-size:22px;font-weight:700;border:none;background:transparent;color:var(--ink);
-    border-bottom:2px dashed transparent;padding:0;max-width:360px;
-  }
-  header.top input.company:hover, header.top input.company:focus{border-bottom-color:var(--line);outline:none;}
 
   .year-switch{display:flex;align-items:center;gap:8px;}
   .year-switch button{
@@ -94,7 +89,13 @@
   }
   .year-switch input{width:70px;text-align:center;font-size:16px;font-weight:700;border:1px solid var(--line);
     border-radius:6px;padding:5px;background:var(--panel);color:var(--ink);}
-
+  .year-switch-dark button{
+    background:transparent; border-color:rgba(255,255,255,.3); color:#fff;
+  }
+  .year-switch-dark button:hover{background:rgba(255,255,255,.1);}
+  .year-switch-dark input{
+    background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.3); color:#fff;
+  }
 
   .toolbar{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;align-items:center;}
   .toolbar button, .toolbar select{
@@ -250,9 +251,14 @@
     <div class="dark-banner">
       <div class="db-left">
         <span class="db-icon">🚁</span>
-        <span class="db-title" id="bannerTitle">AME Work Schedule</span>
+        <input class="company db-title-input" id="companyName" value="AME Work Schedule">
       </div>
       <div class="db-right">
+        <div class="year-switch year-switch-dark">
+          <button id="yearPrev">‹</button>
+          <input id="yearInput" type="number" value="2026">
+          <button id="yearNext">›</button>
+        </div>
         <button class="db-icon-btn" id="gearBtn" title="Settings">⚙</button>
         <button class="db-profile-btn" id="profileBtn" title="Manager profile">
           <span class="db-avatar">👤</span>
@@ -268,15 +274,6 @@
         <button id="changePassBtn">Change password</button>
       </div>
     </div>
-
-    <header class="top">
-      <input class="company" id="companyName" value="AME Work Schedule">
-      <div class="year-switch">
-        <button id="yearPrev">‹</button>
-        <input id="yearInput" type="number" value="2026">
-        <button id="yearNext">›</button>
-      </div>
-    </header>
 
     <div class="toolbar">
       <button id="rangeModeBtn">Select a range of days</button>
@@ -1229,7 +1226,6 @@
 
     document.getElementById('yearInput').value = currentYear;
     document.getElementById('companyName').value = state.company;
-    document.getElementById('bannerTitle').textContent = state.company;
 
     const wrap = document.getElementById('tableWrap');
     wrap.innerHTML = '';
@@ -1431,11 +1427,6 @@
     document.getElementById('gatePass').value = '';
     initGate();
   };
-
-  // keep the banner title mirroring the company name field
-  document.getElementById('companyName').addEventListener('input', (e)=>{
-    document.getElementById('bannerTitle').textContent = e.target.value || 'Work Schedule';
-  });
 
   // init
   initGate();
