@@ -308,6 +308,7 @@
   // "RESET" is special: clears the override entirely, reverting to the automatic default.
   const CONDITIONS = [
     {key:'RESET',  label:'Weekend / Stat', swatch:'weekend'},
+    {key:'MARK_STAT', label:'Mark as Weekend / Stat', status:'OFF', shift:null, moved:true, swatch:'weekend'},
     {key:'WORK',   label:'Work day',            status:'WORK', shift:null, swatch:'work'},
     {key:'M',      label:'Morning shift',       status:'WORK', shift:'M',  swatch:'work', badge:'M'},
     {key:'A',      label:'Afternoon shift',     status:'WORK', shift:'A',  swatch:'work', badge:'A'},
@@ -896,7 +897,7 @@
         }
 
         let tooltip = shift ? SHIFT_LABEL[shift] : (status==='HALF' ? (half==='SICK' ? 'Half day sick' : 'Half day off') : (status ? STATUS_LABEL[status] : ((weekend||isHoliday) ? 'Weekend/holiday (default off)' : 'Work day (default)')));
-        if(status==='OFF' && moved) tooltip = 'Weekend day moved here';
+        if(status==='OFF' && moved) tooltip = 'Weekend / Stat';
         else if(moved) tooltip += ' (moved)';
         if(isPast && !forPrint) tooltip += ' — past date, password required to change';
         td.title = tooltip;
@@ -1078,7 +1079,7 @@
       const emp = state.employees.find(e=>e.id===empId);
       for(let d=dayLo; d<=dayHi; d++){
         const prev = getCell(year, month, d, empId);
-        const next = cond.key==='RESET' ? null : {status:cond.status, shift:cond.shift, half: cond.half||null, moved:false};
+        const next = cond.key==='RESET' ? null : {status:cond.status, shift:cond.shift, half: cond.half||null, moved: !!cond.moved};
         if(isPastDate(year, month, d)){
           archiveChange(year, {ts:new Date().toISOString(), month, day:d, empId, empName: emp?emp.name:empId, before:prev, after:next});
         }
