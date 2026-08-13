@@ -216,6 +216,9 @@
     #printArea table.sched th, #printArea table.sched td{
       border: 2px solid #000 !important;
     }
+    #printArea .past::after{
+      background: var(--blue-past) !important;
+    }
   }
   .note{font-size:11.5px;color:var(--grey-strong);line-height:1.5;}
 
@@ -846,7 +849,7 @@
       const th2 = document.createElement('th');
       th2.className = 'datenum' + (weekend?' weekend':'') + (isHoliday?' holiday':'');
       th2.textContent = d;
-      if(isPast && !forPrint) th2.classList.add('past');
+      if(isPast) th2.classList.add('past');
       if(isHoliday){ th2.title = holidays[hKey]; const m=document.createElement('span'); m.className='holiday-mark'; m.textContent='H'; th2.appendChild(m); }
       rowDate.appendChild(th2);
     }
@@ -910,7 +913,7 @@
           td.classList.add(status);
         }
         if(moved) td.classList.add('moved');
-        if(isPast && !forPrint) td.classList.add('past');
+        if(isPast) td.classList.add('past');
 
         if(!forPrint){
           const rs = isInRange(year, month, d, emp.id);
