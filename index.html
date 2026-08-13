@@ -75,7 +75,7 @@
   }
   .toolbar button.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
   .toolbar button.active-mode{background:var(--blue-past-strong);color:#fff;border-color:var(--blue-past-strong);}
-  #moveHint, #rangeHint{font-size:12.5px;color:var(--blue-past-strong);font-weight:600;display:none;}
+  #rangeHint{font-size:12.5px;color:var(--blue-past-strong);font-weight:600;display:none;}
 
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:18px;}
 
@@ -119,11 +119,8 @@
   .swatch.UNPAID{
     background:repeating-linear-gradient(45deg, var(--red), var(--red) 3px, #ffffff 3px, #ffffff 6px);
   }
-  td.cell.moved{box-shadow: inset 0 0 0 2px #2a2a2a; }
-  td.cell.move-anchor{box-shadow: inset 0 0 0 3px var(--accent);}
   td.cell.range-anchor{box-shadow: inset 0 0 0 2px var(--ink);}
   td.cell.range-selected{box-shadow: inset 0 0 0 2px var(--ink); filter:brightness(0.92);}
-  td.cell.selectable-target{background:#eafaf0 !important; box-shadow: inset 0 0 0 2px var(--green-strong);}
   td.cell span.code{font-weight:700;font-size:10px;color:#2a2a2a;position:relative;z-index:2;}
   .half-off{background: linear-gradient(to bottom left, var(--red) 50%, var(--green) 50%);}
   .half-sick{background: linear-gradient(to bottom left, var(--skyblue) 50%, var(--green) 50%);}
@@ -132,8 +129,8 @@
     text-shadow:0 0 2px rgba(0,0,0,.7), 0 0 1px rgba(0,0,0,.7);
   }
   .shift-badge{
-    position:absolute;top:0px;left:0px;width:16px;height:16px;border-radius:50%;
-    font-size:11px;font-weight:800;color:#fff;line-height:16px;text-align:center;z-index:2;
+    position:absolute;top:1px;left:1px;width:11px;height:11px;border-radius:50%;
+    font-size:8px;font-weight:800;color:#fff;line-height:11px;text-align:center;z-index:2;
     box-shadow:0 0 0 1px rgba(255,255,255,.6);
   }
   .shift-badge.shift-M{background:var(--morning);}
@@ -226,8 +223,6 @@
 
   <div class="toolbar">
     <button id="addEmpToggle">+ Employee</button>
-    <button id="moveModeBtn">Move a weekend day</button>
-    <span id="moveHint">Click a weekend/holiday cell (it'll outline in orange), then click the weekday to swap it with — works across different months too.</span>
     <button id="rangeModeBtn">Select a range of days</button>
     <span id="rangeHint">Click a day for a single change, or click two days (even in different employee rows) to select a block, then click a condition below to apply it to everyone in that block.</span>
     <span style="flex:1"></span>
@@ -259,7 +254,7 @@
     Click any cell to quickly cycle it through: Work → Morning → Afternoon → Day off → Sick → Requested off → Unpaid → back to normal.
     For bulk edits, click "Select a range of days," then click a single cell (or two cells — even across different employees) to select a block, then click a condition in the legend above to apply it to everyone in that block.
     Weekends and Alberta general holidays default to a day off (yellow) automatically. Days already in the past are tinted blue automatically.
-    "Move a weekend day" swaps someone's weekend off with a weekday in the same week.
+    To swap someone's weekend for a weekday off — e.g. have them work Saturday and take Monday off instead — select the weekend day and apply "Work day," then select the weekday and apply "Weekend / Stat."
     Editing a day that's already passed asks for your password and logs the change. Removing an employee keeps them visible on past months they worked, but hides them from the current and future schedule.
   </div>
 
@@ -499,8 +494,6 @@
   };
   let currentYear = today.getFullYear();
   let currentMonth = today.getMonth();
-  let moveMode = false;
-  let moveSource = null; // {month,day,empId}
   let rangeMode = false;
   let rangeStart = null; // {year,month,day,empId}
   let rangeEnd = null;   // {year,month,day,empId}
@@ -876,9 +869,6 @@
           const rs = isInRange(year, month, d, emp.id);
           if(rs==='anchor') td.classList.add('range-anchor');
           if(rs==='selected') td.classList.add('range-selected');
-          if(moveSource && moveSource.year===year && moveSource.month===month && moveSource.day===d && moveSource.empId===emp.id){
-            td.classList.add('move-anchor');
-          }
         }
 
         if(shift){
@@ -955,10 +945,6 @@
   }
 
   async function handleCellClick(year, month, day, empId, isOffDefault){
-    if(moveMode){
-      handleMoveClick(year, month, day, empId, isOffDefault);
-      return;
-    }
     if(rangeMode){
       handleRangeClick(year, month, day, empId);
       return;
@@ -988,46 +974,6 @@
       archiveChange(year, {ts:new Date().toISOString(), month, day, empId, empName: emp?emp.name:empId, before:rec, after:newRec});
     }
     setCell(year, month, day, empId, newRec);
-    renderAll();
-  }
-
-  async function handleMoveClick(year, month, day, empId, isOffDefault){
-    if(!moveSource){
-      if(!isOffDefault){
-        alert('Pick a weekend or holiday cell first (the day you want to move off of).');
-        return;
-      }
-      moveSource = {year, month, day, empId};
-      renderAll();
-      return;
-    }
-    if(moveSource.empId !== empId){
-      alert('Pick the target day for the same employee.');
-      return;
-    }
-    if(isOffDefault){
-      alert('Pick a weekday as the target for the swap.');
-      return;
-    }
-    const srcPast = isPastDate(moveSource.year, moveSource.month, moveSource.day);
-    const tgtPast = isPastDate(year, month, day);
-    if(srcPast || tgtPast){
-      const ok = await requestPastEditPassword();
-      if(!ok) return;
-    }
-    const prevSrc = getCell(moveSource.year, moveSource.month, moveSource.day, empId);
-    const prevTgt = getCell(year, month, day, empId);
-    const newSrc = {status:'WORK', shift:null, moved:true};
-    const newTgt = {status:'OFF', shift:null, moved:true};
-    const emp = state.employees.find(e=>e.id===empId);
-    if(srcPast) archiveChange(moveSource.year, {ts:new Date().toISOString(), month:moveSource.month, day:moveSource.day, empId, empName: emp?emp.name:empId, before:prevSrc, after:newSrc});
-    if(tgtPast) archiveChange(year, {ts:new Date().toISOString(), month, day, empId, empName: emp?emp.name:empId, before:prevTgt, after:newTgt});
-    setCell(moveSource.year, moveSource.month, moveSource.day, empId, newSrc);
-    setCell(year, month, day, empId, newTgt);
-    moveSource = null;
-    moveMode = false;
-    document.getElementById('moveModeBtn').classList.remove('active-mode');
-    document.getElementById('moveHint').style.display = 'none';
     renderAll();
   }
 
@@ -1269,27 +1215,9 @@
     renderAll();
   };
 
-  document.getElementById('moveModeBtn').onclick = ()=>{
-    moveMode = !moveMode;
-    moveSource = null;
-    if(moveMode){
-      rangeMode = false; rangeStart=null; rangeEnd=null;
-      document.getElementById('rangeModeBtn').classList.remove('active-mode');
-      document.getElementById('rangeHint').style.display = 'none';
-    }
-    document.getElementById('moveModeBtn').classList.toggle('active-mode', moveMode);
-    document.getElementById('moveHint').style.display = moveMode ? 'inline':'none';
-    renderAll();
-  };
-
   document.getElementById('rangeModeBtn').onclick = ()=>{
     rangeMode = !rangeMode;
     rangeStart = null; rangeEnd = null;
-    if(rangeMode){
-      moveMode = false; moveSource=null;
-      document.getElementById('moveModeBtn').classList.remove('active-mode');
-      document.getElementById('moveHint').style.display = 'none';
-    }
     document.getElementById('rangeModeBtn').classList.toggle('active-mode', rangeMode);
     document.getElementById('rangeHint').style.display = rangeMode ? 'inline':'none';
     renderAll();
