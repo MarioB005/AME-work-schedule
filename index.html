@@ -39,6 +39,10 @@
   }
   #app{max-width:1500px;margin:0 auto;padding:20px 24px 60px;}
 
+  #stickyTop{
+    position: sticky; top: 0; z-index: 30; background: var(--paper);
+    padding-top: 4px; padding-bottom: 4px; border-bottom: 2px solid var(--ink);
+  }
   header.top{
     display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;
     border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:16px;
@@ -57,16 +61,6 @@
   .year-switch input{width:70px;text-align:center;font-size:16px;font-weight:700;border:1px solid var(--line);
     border-radius:6px;padding:5px;background:var(--panel);color:var(--ink);}
 
-  nav.months{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;align-items:center;}
-  nav.months button.monthpill{
-    padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--panel);
-    cursor:pointer;font-size:13px;color:var(--ink);
-  }
-  nav.months button.monthpill.active{background:var(--ink);color:#fff;border-color:var(--ink);}
-  nav.months .slide-btn{
-    width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--panel);
-    cursor:pointer;font-size:15px;line-height:1;margin:0 6px;
-  }
 
   .toolbar{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;align-items:center;}
   .toolbar button, .toolbar select{
@@ -171,10 +165,10 @@
   .modal button{margin-top:12px;padding:8px 14px;border-radius:7px;border:1px solid var(--line);background:var(--panel);cursor:pointer;}
 
   #printArea{display:none;}
+  @page { size: landscape; margin: 10mm; }
   @media print{
-    body *{visibility:hidden;}
-    #printArea, #printArea *{visibility:visible;}
-    #printArea{display:block;position:absolute;top:0;left:0;width:100%;}
+    #gate, #app { display: none !important; }
+    #printArea { display: block !important; }
     #printArea h2{margin-top:24px;}
     * {
       -webkit-print-color-adjust: exact !important;
@@ -216,40 +210,40 @@
 
 <div id="app" style="display:none;">
 
-  <header class="top">
-    <input class="company" id="companyName" value="AME Work Schedule">
-    <div class="year-switch">
-      <button id="yearPrev">‹</button>
-      <input id="yearInput" type="number" value="2026">
-      <button id="yearNext">›</button>
+  <div id="stickyTop">
+    <header class="top">
+      <input class="company" id="companyName" value="AME Work Schedule">
+      <div class="year-switch">
+        <button id="yearPrev">‹</button>
+        <input id="yearInput" type="number" value="2026">
+        <button id="yearNext">›</button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <button id="addEmpToggle">+ Employee</button>
+      <button id="rangeModeBtn">Select a range of days</button>
+      <span id="rangeHint">Click a day for a single change, or click two days (even in different employee rows) to select a block, then click a condition below to apply it to everyone in that block.</span>
+      <span style="flex:1"></span>
+      <button id="pdfBtn" class="primary">Prepare PDF (this + next month)</button>
+      <button id="emailBtn">Print &amp; email schedule</button>
+      <button id="summaryBtn">Employee summary</button>
+      <button id="changePassBtn">Change password</button>
     </div>
-  </header>
 
-  <nav class="months" id="monthNav"></nav>
-
-  <div class="toolbar">
-    <button id="addEmpToggle">+ Employee</button>
-    <button id="rangeModeBtn">Select a range of days</button>
-    <span id="rangeHint">Click a day for a single change, or click two days (even in different employee rows) to select a block, then click a condition below to apply it to everyone in that block.</span>
-    <span style="flex:1"></span>
-    <button id="pdfBtn" class="primary">Prepare PDF (this + next month)</button>
-    <button id="emailBtn">Print &amp; email schedule</button>
-    <button id="summaryBtn">Employee summary</button>
-    <button id="changePassBtn">Change password</button>
-  </div>
-
-  <div class="panel" id="empPanel" style="display:none;">
-    <div class="emp-manager">
-      <div class="field"><label>Name</label><input id="newEmpName" placeholder="e.g. Randy"></div>
-      <div class="field"><label>Email</label><input id="newEmpEmail" placeholder="name@company.com"></div>
-      <div class="field"><label>Start date (optional)</label><input id="newEmpStart" type="date"></div>
-      <button id="addEmpBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--line);cursor:pointer;">Add</button>
+    <div class="panel" id="empPanel" style="display:none;">
+      <div class="emp-manager">
+        <div class="field"><label>Name</label><input id="newEmpName" placeholder="e.g. Randy"></div>
+        <div class="field"><label>Email</label><input id="newEmpEmail" placeholder="name@company.com"></div>
+        <div class="field"><label>Start date (optional)</label><input id="newEmpStart" type="date"></div>
+        <button id="addEmpBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--line);cursor:pointer;">Add</button>
+      </div>
+      <div class="emp-list" id="empList"></div>
     </div>
-    <div class="emp-list" id="empList"></div>
-  </div>
 
-  <div class="panel">
-    <div class="legend" id="legend"></div>
+    <div class="panel" style="margin-bottom:0;">
+      <div class="legend" id="legend"></div>
+    </div>
   </div>
 
   <div class="panel" style="overflow-x:auto;">
@@ -728,31 +722,6 @@
   }
 
   // ---------- rendering ----------
-  function renderMonthNav(){
-    const nav = document.getElementById('monthNav');
-    nav.innerHTML = '';
-    const prevBtn = document.createElement('button');
-    prevBtn.className = 'slide-btn'; prevBtn.textContent = '‹';
-    prevBtn.title = 'Slide back one month';
-    prevBtn.onclick = ()=>{ const p = monthOffset(currentYear,currentMonth,-1); currentYear=p.year; currentMonth=p.month; renderAll(); };
-    nav.appendChild(prevBtn);
-
-    MONTHS.forEach((m,i)=>{
-      const b = document.createElement('button');
-      b.className = 'monthpill';
-      b.textContent = m;
-      if(i===currentMonth) b.classList.add('active');
-      b.onclick = ()=>{ currentMonth=i; renderAll(); };
-      nav.appendChild(b);
-    });
-
-    const nextBtn = document.createElement('button');
-    nextBtn.className = 'slide-btn'; nextBtn.textContent = '›';
-    nextBtn.title = 'Slide forward one month';
-    nextBtn.onclick = ()=>{ const n = monthOffset(currentYear,currentMonth,1); currentYear=n.year; currentMonth=n.month; renderAll(); };
-    nav.appendChild(nextBtn);
-  }
-
   function empIdsInMonthOrder(year, month){
     return employeesForMonth(year, month).map(e=>e.id);
   }
@@ -1172,12 +1141,15 @@
   }
 
   async function renderAll(){
-    const monthsToShow = [0,1,2].map(off=>monthOffset(currentYear,currentMonth,off));
+    const monthsToShow = [];
+    for(let m=0; m<12; m++) monthsToShow.push({year:currentYear, month:m});
+    monthsToShow.push({year:currentYear+1, month:0});
+    monthsToShow.push({year:currentYear+1, month:1});
+
     const years = Array.from(new Set(monthsToShow.map(m=>m.year)));
     await Promise.all(years.map(y=>ensureYearLoaded(y)));
     await Promise.all(monthsToShow.map(m=>ensureNotesLoaded(m.year, m.month)));
 
-    renderMonthNav();
     document.getElementById('yearInput').value = currentYear;
 
     const wrap = document.getElementById('tableWrap');
