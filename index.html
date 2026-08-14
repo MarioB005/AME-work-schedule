@@ -171,6 +171,14 @@
     border-radius:999px;padding:5px 10px 5px 6px;cursor:pointer;font-size:12px;color:var(--ink);
   }
   .legend button:hover{border-color:var(--ink);}
+  .shift-times{
+    display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:10px; padding-top:10px;
+    border-top:1px solid var(--line); font-size:12.5px;
+  }
+  .shift-times-label{display:flex; align-items:center; gap:5px; color:var(--grey-strong); font-weight:600;}
+  .shift-times select{
+    padding:6px 8px; border:1px solid var(--line); border-radius:7px; font-size:12.5px; background:var(--panel); color:var(--ink);
+  }
   .legend button.info{cursor:default;opacity:.75;}
   .legend button.info:hover{border-color:var(--line);}
   .legend .swatch{width:14px;height:14px;border-radius:4px;display:inline-block;border:1px solid rgba(0,0,0,.15);position:relative;flex-shrink:0;}
@@ -296,6 +304,12 @@
 
     <div class="panel" style="margin-bottom:0;">
       <div class="legend" id="legend"></div>
+      <div class="shift-times">
+        <span class="shift-times-label"><span style="width:9px;height:9px;border-radius:50%;background:var(--morning);display:inline-block;"></span> Morning shift:</span>
+        <select id="morningStartInput"></select>
+        <span class="shift-times-label"><span style="width:9px;height:9px;border-radius:50%;background:var(--afternoon);display:inline-block;"></span> Afternoon shift:</span>
+        <select id="afternoonStartInput"></select>
+      </div>
     </div>
   </div>
 
@@ -1344,6 +1358,46 @@
   document.getElementById('addEmpToggle').addEventListener('click', ()=> gearDropdown.classList.remove('show'));
   document.getElementById('changePassBtn').addEventListener('click', ()=> gearDropdown.classList.remove('show'));
 
+  // ---------- shift start times (shared reference times for Morning/Afternoon) ----------
+  function formatHalfHour(h, m){
+    const period = h < 12 ? 'AM' : 'PM';
+    let h12 = h % 12; if(h12===0) h12 = 12;
+    return h12 + ':' + (m===0 ? '00' : '30') + ' ' + period;
+  }
+  function buildTimeOptions(selectEl, storedValue){
+    selectEl.innerHTML = '';
+    for(let h=0; h<24; h++){
+      for(let m=0; m<60; m+=30){
+        const value = h + ':' + (m===0 ? '00' : '30');
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = formatHalfHour(h, m);
+        if(value === storedValue) opt.selected = true;
+        selectEl.appendChild(opt);
+      }
+    }
+  }
+  async function initShiftTimes(){
+    const morningSel = document.getElementById('morningStartInput');
+    const afternoonSel = document.getElementById('afternoonStartInput');
+    let stored = {morning:'7:00', afternoon:'13:00'};
+    try{
+      const raw = await storageGet('shiftTimes', true);
+      if(raw) stored = JSON.parse(raw);
+    }catch(e){}
+    buildTimeOptions(morningSel, stored.morning);
+    buildTimeOptions(afternoonSel, stored.afternoon);
+    morningSel.onchange = saveShiftTimes;
+    afternoonSel.onchange = saveShiftTimes;
+  }
+  async function saveShiftTimes(){
+    const value = {
+      morning: document.getElementById('morningStartInput').value,
+      afternoon: document.getElementById('afternoonStartInput').value
+    };
+    await storageSet('shiftTimes', JSON.stringify(value), true);
+  }
+
   async function loadManagerProfile(){
     try{
       const raw = await storageGet('managerProfile', true);
@@ -1387,6 +1441,7 @@
   // init
   initGate();
   loadManagerProfile().then(applyProfileToBanner);
+  initShiftTimes();
 })();
 </script>
 </body>
