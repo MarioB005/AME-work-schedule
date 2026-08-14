@@ -153,6 +153,8 @@
   .half-off{background: linear-gradient(to bottom left, var(--red) 50%, var(--green) 50%);}
   .half-sick{background: linear-gradient(to bottom left, var(--skyblue) 50%, var(--green) 50%);}
   .half-vac{background: linear-gradient(to bottom left, var(--vacation) 50%, var(--green) 50%);}
+  .work-m{background: linear-gradient(to bottom left, var(--morning) 50%, var(--green) 50%);}
+  .work-a{background: linear-gradient(to bottom left, var(--afternoon) 50%, var(--green) 50%);}
   .half-badge{
     position:absolute;top:1px;right:2px;font-size:10px;font-weight:800;color:#fff;z-index:2;
     text-shadow:0 0 2px rgba(0,0,0,.7), 0 0 1px rgba(0,0,0,.7);
@@ -166,11 +168,11 @@
   .shift-badge.shift-A{background:var(--afternoon);}
 
   .legend{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;align-items:center;}
-  .legend button{
+  .legend button, .shift-times button{
     display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);
     border-radius:999px;padding:5px 10px 5px 6px;cursor:pointer;font-size:12px;color:var(--ink);
   }
-  .legend button:hover{border-color:var(--ink);}
+  .legend button:hover, .shift-times button:hover{border-color:var(--ink);}
   .shift-times{
     display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:10px; padding-top:10px;
     border-top:1px solid var(--line); font-size:12.5px;
@@ -181,10 +183,13 @@
   }
   .legend button.info{cursor:default;opacity:.75;}
   .legend button.info:hover{border-color:var(--line);}
-  .legend .swatch{width:14px;height:14px;border-radius:4px;display:inline-block;border:1px solid rgba(0,0,0,.15);position:relative;flex-shrink:0;}
-  .legend .swatch .mini-badge{position:absolute;top:-1px;left:-1px;width:7px;height:7px;border-radius:50%;}
-  .legend .swatch .mini-badge.shift-M{background:var(--morning);}
-  .legend .swatch .mini-badge.shift-A{background:var(--afternoon);}
+  .swatch{width:14px;height:14px;border-radius:4px;display:inline-block;border:1px solid rgba(0,0,0,.15);position:relative;flex-shrink:0;}
+  .swatch .mini-badge{
+    position:absolute;top:-2px;left:-2px;width:8px;height:8px;border-radius:50%;
+    border:1px solid rgba(255,255,255,.9);
+  }
+  .swatch .mini-badge.shift-M{background:var(--morning);}
+  .swatch .mini-badge.shift-A{background:var(--afternoon);}
 
   .emp-manager{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:10px;}
   .emp-manager .field{display:flex;flex-direction:column;gap:4px;}
@@ -305,9 +310,9 @@
     <div class="panel" style="margin-bottom:0;">
       <div class="legend" id="legend"></div>
       <div class="shift-times">
-        <span class="shift-times-label"><span style="width:9px;height:9px;border-radius:50%;background:var(--morning);display:inline-block;"></span> Morning shift:</span>
+        <span id="morningCondSlot"></span>
         <select id="morningStartInput"></select>
-        <span class="shift-times-label"><span style="width:9px;height:9px;border-radius:50%;background:var(--afternoon);display:inline-block;"></span> Afternoon shift:</span>
+        <span id="afternoonCondSlot"></span>
         <select id="afternoonStartInput"></select>
       </div>
     </div>
@@ -1062,24 +1067,36 @@
     renderAll();
   }
 
+  function buildConditionButton(cond){
+    const btn = document.createElement('button');
+    const sw = document.createElement('span');
+    sw.className = 'swatch ' + cond.swatch;
+    if(cond.badge){
+      const mini = document.createElement('span');
+      mini.className = 'mini-badge shift-' + cond.badge;
+      sw.appendChild(mini);
+    }
+    btn.appendChild(sw);
+    btn.appendChild(document.createTextNode(cond.label));
+    btn.title = 'Click to apply to your selected range of days';
+    btn.onclick = ()=> applyConditionToRange(cond.key);
+    return btn;
+  }
+
   function renderLegend(){
     const el = document.getElementById('legend');
     el.innerHTML = '';
     CONDITIONS.forEach(cond=>{
-      const btn = document.createElement('button');
-      const sw = document.createElement('span');
-      sw.className = 'swatch ' + cond.swatch;
-      if(cond.badge){
-        const mini = document.createElement('span');
-        mini.className = 'mini-badge shift-' + cond.badge;
-        sw.appendChild(mini);
-      }
-      btn.appendChild(sw);
-      btn.appendChild(document.createTextNode(cond.label));
-      btn.title = 'Click to apply to your selected range of days';
-      btn.onclick = ()=> applyConditionToRange(cond.key);
-      el.appendChild(btn);
+      if(cond.key==='M' || cond.key==='A') return; // these live in the shift-times row instead
+      el.appendChild(buildConditionButton(cond));
     });
+    const mCond = CONDITIONS.find(c=>c.key==='M');
+    const aCond = CONDITIONS.find(c=>c.key==='A');
+    const mSlot = document.getElementById('morningCondSlot');
+    const aSlot = document.getElementById('afternoonCondSlot');
+    mSlot.innerHTML = ''; aSlot.innerHTML = '';
+    if(mCond) mSlot.appendChild(buildConditionButton(mCond));
+    if(aCond) aSlot.appendChild(buildConditionButton(aCond));
   }
 
   function renderEmployeeList(){
