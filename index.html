@@ -1319,7 +1319,7 @@
     await ensureYearLoaded(nextYear);
     buildPrintArea();
     window.print();
-    const emails = state.employees.map(e=>e.email).filter(Boolean).join(',');
+    const emails = state.employees.map(e=>e.email).filter(Boolean).join(';');
     const nextMonth = (currentMonth+1)%12;
     const subject = encodeURIComponent(state.company + ' - ' + MONTHS[currentMonth] + ' & ' + MONTHS[nextMonth] + ' schedule');
     const body = encodeURIComponent('Hi all,\n\nAttached is the work schedule for ' + MONTHS[currentMonth] + ' and ' + MONTHS[nextMonth] + '.\n\nThanks.');
