@@ -218,10 +218,10 @@
   .modal button{margin-top:12px;padding:8px 14px;border-radius:7px;border:1px solid var(--line);background:var(--panel);cursor:pointer;}
 
   #printArea{display:none;}
-  @page { size: landscape; margin: 0; }
+  @page { size: landscape; margin: 10mm; }
   @media print{
     #gate, #app { display: none !important; }
-    #printArea { display: block !important; padding: 10mm; }
+    #printArea { display: block !important; }
     #printArea h2{margin-top:24px;}
     * {
       -webkit-print-color-adjust: exact !important;
