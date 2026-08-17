@@ -218,10 +218,10 @@
   .modal button{margin-top:12px;padding:8px 14px;border-radius:7px;border:1px solid var(--line);background:var(--panel);cursor:pointer;}
 
   #printArea{display:none;}
-  @page { size: landscape; margin: 10mm; }
+  @page { size: landscape; margin: 0; }
   @media print{
     #gate, #app { display: none !important; }
-    #printArea { display: block !important; }
+    #printArea { display: block !important; padding: 10mm; }
     #printArea h2{margin-top:24px;}
     * {
       -webkit-print-color-adjust: exact !important;
@@ -310,7 +310,11 @@
     <div class="toolbar">
       <button id="clearSelectionBtn">Clear selection</button>
       <span style="flex:1"></span>
-      <button id="pdfBtn" class="primary">Prepare PDF (this + next month)</button>
+      <label style="font-size:12.5px;color:var(--grey-strong);display:flex;align-items:center;gap:6px;">
+        Months to include
+        <input type="number" id="pdfMonthCount" min="1" max="12" value="2" style="width:50px;padding:6px 7px;border:1px solid var(--line);border-radius:7px;font-size:13px;">
+      </label>
+      <button id="pdfBtn" class="primary">Prepare PDF</button>
       <button id="emailBtn">Print &amp; email schedule</button>
       <button id="summaryBtn">Employee summary</button>
     </div>
@@ -397,7 +401,7 @@
 <div class="modal-backdrop" id="emailModalBackdrop">
   <div class="modal">
     <h3>Print &amp; email the schedule</h3>
-    <p class="note">This opens the print dialog for this month + next month (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as BCC), with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
+    <p class="note">This opens the print dialog for however many months are set in "Months to include" (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as BCC), with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
     <button id="emailGoBtn">Print PDF &amp; open email</button>
     <button id="emailCancelBtn">Cancel</button>
   </div>
@@ -1295,9 +1299,13 @@
   function buildPrintArea(){
     const printArea = document.getElementById('printArea');
     printArea.innerHTML = '';
-    const nextMonth = (currentMonth+1) % 12;
-    const nextYear = currentMonth===11 ? currentYear+1 : currentYear;
-    ensureYearSync(nextYear);
+
+    let monthCount = parseInt(document.getElementById('pdfMonthCount').value, 10);
+    if(!monthCount || monthCount < 1) monthCount = 1;
+    if(monthCount > 12) monthCount = 12;
+    const monthsToPrint = [];
+    for(let i=0; i<monthCount; i++) monthsToPrint.push(monthOffset(currentYear, currentMonth, i));
+    monthsToPrint.forEach(m => ensureYearSync(m.year));
 
     const h1 = document.createElement('h1'); h1.textContent = state.company;
     printArea.appendChild(h1);
@@ -1335,7 +1343,7 @@
     });
     printArea.appendChild(legendWrap);
 
-    [[currentYear,currentMonth],[nextYear,nextMonth]].forEach(([y,m])=>{
+    monthsToPrint.forEach(({year:y, month:m})=>{
       const h2 = document.createElement('h2'); h2.textContent = MONTHS[m] + ' ' + y;
       printArea.appendChild(h2);
       printArea.appendChild(buildMonthTable(y, m, true));
@@ -1343,8 +1351,12 @@
   }
 
   document.getElementById('pdfBtn').onclick = async ()=>{
-    const nextYear = currentMonth===11 ? currentYear+1 : currentYear;
-    await ensureYearLoaded(nextYear);
+    let monthCount = parseInt(document.getElementById('pdfMonthCount').value, 10);
+    if(!monthCount || monthCount < 1) monthCount = 1;
+    if(monthCount > 12) monthCount = 12;
+    const years = new Set();
+    for(let i=0; i<monthCount; i++) years.add(monthOffset(currentYear, currentMonth, i).year);
+    await Promise.all(Array.from(years).map(y => ensureYearLoaded(y)));
     buildPrintArea();
     window.print();
   };
@@ -1398,14 +1410,21 @@
   document.getElementById('emailCancelBtn').onclick = ()=>{ emailBackdrop.classList.remove('show'); };
   document.getElementById('emailGoBtn').onclick = async ()=>{
     emailBackdrop.classList.remove('show');
-    const nextYear = currentMonth===11 ? currentYear+1 : currentYear;
-    await ensureYearLoaded(nextYear);
+    let monthCount = parseInt(document.getElementById('pdfMonthCount').value, 10);
+    if(!monthCount || monthCount < 1) monthCount = 1;
+    if(monthCount > 12) monthCount = 12;
+    const years = new Set();
+    for(let i=0; i<monthCount; i++) years.add(monthOffset(currentYear, currentMonth, i).year);
+    await Promise.all(Array.from(years).map(y => ensureYearLoaded(y)));
     buildPrintArea();
     window.print();
     const emails = state.employees.map(e=>e.email).filter(Boolean).join(';');
-    const nextMonth = (currentMonth+1)%12;
-    const subject = encodeURIComponent(state.company + ' - ' + MONTHS[currentMonth] + ' & ' + MONTHS[nextMonth] + ' schedule');
-    const body = encodeURIComponent('Hi all,\n\nAttached is the work schedule for ' + MONTHS[currentMonth] + ' and ' + MONTHS[nextMonth] + '.\n\nThanks.');
+    const lastMonth = monthOffset(currentYear, currentMonth, monthCount-1);
+    const monthLabel = monthCount===1
+      ? MONTHS[currentMonth]
+      : MONTHS[currentMonth] + ' through ' + MONTHS[lastMonth.month];
+    const subject = encodeURIComponent(state.company + ' - ' + monthLabel + ' schedule');
+    const body = encodeURIComponent('Hi all,\n\nAttached is the work schedule for ' + monthLabel + '.\n\nThanks.');
     setTimeout(()=>{
       window.location.href = 'mailto:?bcc=' + encodeURIComponent(emails) + '&subject=' + subject + '&body=' + body;
     }, 400);
