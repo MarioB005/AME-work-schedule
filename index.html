@@ -1426,7 +1426,7 @@
     const subject = encodeURIComponent(state.company + ' - ' + monthLabel + ' schedule');
     const body = encodeURIComponent('Hi all,\n\nAttached is the work schedule for ' + monthLabel + '.\n\nThanks.');
     setTimeout(()=>{
-      window.location.href = 'mailto:?bcc=' + encodeURIComponent(emails) + '&subject=' + subject + '&body=' + body;
+      window.location.href = 'mailto:?to=' + encodeURIComponent(emails) + '&subject=' + subject + '&body=' + body;
     }, 400);
   };
 
