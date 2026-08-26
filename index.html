@@ -260,9 +260,15 @@
     <h2 id="gateTitle">Enter password</h2>
     <p id="gateSub">This schedule is password-protected.</p>
     <div class="gate-error" id="gateError"></div>
-    <input type="password" id="gatePass" placeholder="Password" autocomplete="off">
-    <input type="password" id="gatePass2" placeholder="Confirm password" style="display:none;" autocomplete="off">
-    <button id="gateBtn">Unlock</button>
+    <form id="gateForm" autocomplete="on">
+      <!-- Hidden but present so the browser's password manager can pair a "username" with
+           the password below — most browsers won't offer to save/autofill a password field
+           at all without some paired identity field, even one the person never sees. -->
+      <input type="text" id="gateUser" name="username" value="AME Work Schedule" autocomplete="username" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
+      <input type="password" id="gatePass" name="password" placeholder="Password" autocomplete="current-password">
+      <input type="password" id="gatePass2" placeholder="Confirm password" style="display:none;" autocomplete="new-password">
+      <button id="gateBtn" type="submit">Unlock</button>
+    </form>
   </div>
 </div>
 
@@ -453,20 +459,32 @@
     try{ return localStorage.getItem('cache:'+key); }catch(e){ return null; }
   }
 
+  // Two saves fired close together (e.g. one edit applied, then another right after)
+  // otherwise reach the network as two independent, unordered requests — whichever
+  // happens to land on the server LAST wins, and that isn't guaranteed to be the one
+  // that was actually made last. Chaining every write onto this single queue forces
+  // them out to the network strictly in the order they were made, so the most recent
+  // edit can never be silently overwritten by an older one arriving late.
+  let __storageWriteQueue = Promise.resolve();
+
   async function storageSet(key, value){
     try{ localStorage.setItem('cache:'+key, value); }catch(e){}
     if(!SUPABASE_CONFIGURED) return true;
-    try{
-      await fetch(SUPABASE_URL + '/rest/v1/app_data', {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_ANON_KEY,
-          'Content-Type': 'application/json',
-          Prefer: 'resolution=merge-duplicates,return=minimal'
-        },
-        body: JSON.stringify({ key: key, value: value })
-      });
-    }catch(e){ /* best effort — local cache above still has it */ }
+    const doWrite = async ()=>{
+      try{
+        await fetch(SUPABASE_URL + '/rest/v1/app_data', {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            'Content-Type': 'application/json',
+            Prefer: 'resolution=merge-duplicates,return=minimal'
+          },
+          body: JSON.stringify({ key: key, value: value })
+        });
+      }catch(e){ /* best effort — local cache above still has it */ }
+    };
+    __storageWriteQueue = __storageWriteQueue.then(doWrite, doWrite);
+    await __storageWriteQueue;
     return true;
   }
 
@@ -537,11 +555,16 @@
       sub.textContent = 'Create a password to protect this schedule. Anyone who has this link and the password can view and edit it.';
       p2.style.display = 'block';
       btn.textContent = 'Set password';
+      // "new-password" tells the browser this is a freshly created credential, so it
+      // offers to SAVE it (rather than treating it as an existing login to fill in).
+      p1.autocomplete = 'new-password';
+      p2.autocomplete = 'new-password';
     } else {
       title.textContent = 'Enter password';
       sub.textContent = 'This schedule is password-protected.';
       p2.style.display = 'none';
       btn.textContent = 'Unlock';
+      p1.autocomplete = 'current-password';
     }
 
     function unlock(){
@@ -551,7 +574,11 @@
       initAutoLock();
     }
 
-    btn.onclick = async ()=>{
+    // A real <form> submit (rather than a plain button click handler) is what lets browsers
+    // recognize this as a login and offer to save/autofill the password. preventDefault stops
+    // it from actually navigating — this stays a single-page app either way.
+    document.getElementById('gateForm').onsubmit = async (e)=>{
+      e.preventDefault();
       err.textContent = '';
       if(settingUp){
         if(!p1.value || p1.value.length<4){ err.textContent='Use at least 4 characters.'; return; }
@@ -565,8 +592,6 @@
         else { err.textContent = 'Incorrect password.'; p1.value=''; }
       }
     };
-    p1.addEventListener('keydown', e=>{ if(e.key==='Enter' && !settingUp) btn.click(); });
-    p2.addEventListener('keydown', e=>{ if(e.key==='Enter') btn.click(); });
   }
 
   document.getElementById('changePassBtn').onclick = async ()=>{
@@ -735,6 +760,18 @@
     if(val===null) delete state.schedules[year][k];
     else state.schedules[year][k] = val;
     saveYear(year);
+  }
+  // Mutates in-memory only — does not save. Used when applying a change to several
+  // cells at once (see applyConditionToRange) so the caller can persist ONCE at the
+  // end instead of firing one network write per cell. Firing one write per cell let
+  // those requests race each other: since they all target the same database row,
+  // an earlier (smaller) snapshot could finish saving after a later, more complete
+  // one and silently overwrite it — e.g. a 5-day range ending up with only 3 days saved.
+  function setCellLocal(year, month, day, empId, val){
+    ensureYearSync(year);
+    const k = cellKey(month,day,empId);
+    if(val===null) delete state.schedules[year][k];
+    else state.schedules[year][k] = val;
   }
   function ensureYearSync(year){
     if(!state.schedules[year]) state.schedules[year] = {};
@@ -1075,17 +1112,32 @@
       if(!ok) return;
     }
 
+    // Mutate every cell in memory first, and persist once at the end (awaited) instead of
+    // once per cell — see setCellLocal's comment for why firing one save per cell was
+    // silently losing part of the range.
+    const pastEntries = [];
     for(const empId of empIds){
       const emp = state.employees.find(e=>e.id===empId);
       for(let d=dayLo; d<=dayHi; d++){
         const prev = getCell(year, month, d, empId);
         const next = cond.key==='RESET' ? null : {status:cond.status, shift:cond.shift, half: cond.half||null, moved: !!cond.moved};
         if(isPastDate(year, month, d)){
-          archiveChange(year, {ts:new Date().toISOString(), month, day:d, empId, empName: emp?emp.name:empId, before:prev, after:next});
+          pastEntries.push({ts:new Date().toISOString(), month, day:d, empId, empName: emp?emp.name:empId, before:prev, after:next});
         }
-        setCell(year, month, d, empId, next);
+        setCellLocal(year, month, d, empId, next);
       }
     }
+    if(pastEntries.length){
+      // Also batched into one read-modify-write instead of one per entry, for the same reason.
+      let arr = [];
+      try{
+        const raw = await storageGet('archive:'+year, true);
+        arr = raw ? JSON.parse(raw) : [];
+      }catch(e){}
+      arr.push(...pastEntries);
+      await storageSet('archive:'+year, JSON.stringify(arr), true);
+    }
+    await saveYear(year);
     rangeStart = null; rangeEnd = null;
     renderAll();
   }
@@ -1447,17 +1499,19 @@
   document.getElementById('changePassBtn').addEventListener('click', ()=> gearDropdown.classList.remove('show'));
 
   // ---------- auto-lock after inactivity ----------
+  // Locking does a real page reload (not just re-showing the password gate in place).
+  // That guarantees a fresh fetch of employees/schedules/notes from Supabase, so changes
+  // made from another station show up as soon as this station logs back in.
   let sessionTimeoutMinutes = 30;
   let inactivityTimer = null;
+  let lastActivityAt = Date.now();
 
   function lockApp(){
-    document.getElementById('app').style.display = 'none';
-    document.getElementById('gate').classList.remove('hidden');
-    document.getElementById('gatePass').value = '';
-    initGate();
+    location.reload();
   }
 
   function resetInactivityTimer(){
+    lastActivityAt = Date.now();
     if(inactivityTimer) clearTimeout(inactivityTimer);
     if(sessionTimeoutMinutes > 0){
       inactivityTimer = setTimeout(lockApp, sessionTimeoutMinutes * 60 * 1000);
@@ -1467,6 +1521,19 @@
   ['mousemove','keydown','mousedown','scroll','touchstart'].forEach(evt=>{
     document.addEventListener(evt, ()=>{ if(document.getElementById('app').style.display !== 'none') resetInactivityTimer(); }, {passive:true});
   });
+
+  // Browsers throttle (or fully suspend) setTimeout in a backgrounded tab, and a sleeping
+  // computer pauses JS entirely — so the timer above can miss its fire time while no one is
+  // looking. As a safety net, whenever the tab becomes visible/focused again, check the real
+  // elapsed time and force the reload immediately if the timeout has already passed.
+  function checkStaleOnReturn(){
+    if(document.getElementById('app').style.display === 'none') return; // already at the gate
+    if(sessionTimeoutMinutes > 0 && (Date.now() - lastActivityAt) >= sessionTimeoutMinutes * 60 * 1000){
+      lockApp();
+    }
+  }
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') checkStaleOnReturn(); });
+  window.addEventListener('focus', checkStaleOnReturn);
 
   document.getElementById('sessionTimeoutSelect').onchange = async (e)=>{
     sessionTimeoutMinutes = parseInt(e.target.value, 10);
@@ -1558,11 +1625,7 @@
     profileBackdrop.classList.remove('show');
   };
   document.getElementById('profileSignOutBtn').onclick = ()=>{
-    profileBackdrop.classList.remove('show');
-    document.getElementById('app').style.display = 'none';
-    document.getElementById('gate').classList.remove('hidden');
-    document.getElementById('gatePass').value = '';
-    initGate();
+    location.reload();
   };
 
   // init
