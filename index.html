@@ -307,10 +307,6 @@
         <button id="backupBtn">Backup data (download)</button>
         <button id="restoreBtn">Restore from backup…</button>
         <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
-        <div class="db-dropdown-row">
-          <label for="ccEmailInput">CC email for schedule (not shown on calendar)</label>
-          <input type="email" id="ccEmailInput" placeholder="name@company.com">
-        </div>
         <button id="hrReportBtn">HR report (locked)</button>
         <div class="db-dropdown-row">
           <label for="sessionTimeoutSelect">Auto-lock after</label>
@@ -346,6 +342,13 @@
         <button id="addEmpBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--line);cursor:pointer;">Add</button>
       </div>
       <div class="emp-list" id="empList"></div>
+
+      <div class="emp-manager" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">
+        <div class="field" style="flex:1;min-width:260px;">
+          <label for="ccEmailInput">CC email (gets CC'd on the "Print &amp; email schedule" send — never appears in the employee list above or on the calendar)</label>
+          <input type="email" id="ccEmailInput" placeholder="name@company.com">
+        </div>
+      </div>
     </div>
 
     <div class="panel" style="margin-bottom:0;">
@@ -420,7 +423,7 @@
 <div class="modal-backdrop" id="emailModalBackdrop">
   <div class="modal">
     <h3>Print &amp; email the schedule</h3>
-    <p class="note">This opens the print dialog for however many months are set in "Months to include" (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as BCC), plus your CC email from Settings if you've set one, with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
+    <p class="note">This opens the print dialog for however many months are set in "Months to include" (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as BCC), plus the CC email set in the Employee panel (⚙ → + Employee) if you've added one, with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
     <button id="emailGoBtn">Print PDF &amp; open email</button>
     <button id="emailCancelBtn">Cancel</button>
   </div>
@@ -1906,14 +1909,15 @@
   };
   document.getElementById('hrReportCloseBtn').onclick = ()=>{ hrReportBackdrop.classList.remove('show'); };
 
-  // ---------- one-time migration: drop "Oksana" from the active employee list ----------
-  // She stays visible on any past months she actually worked (same mechanism as the
-  // regular Remove button), just like removing anyone else from Settings would do.
+  // ---------- one-time migration: delete "Oksana" from the employee list entirely ----------
+  // A full delete, not the usual soft-Remove -- she should not show up anywhere in the
+  // Employee panel, including the "Removed employees" history section. Runs on every
+  // load (idempotent: a no-op once she's gone) so it also cleans up anyone who'd already
+  // been soft-removed by an earlier version of this migration.
   async function migrateRemoveOksana(){
-    const oksana = state.employees.find(e => e.active !== false && e.name.trim().toLowerCase() === 'oksana');
-    if(oksana){
-      oksana.active = false;
-      oksana.removedDate = oksana.removedDate || new Date().toISOString().slice(0,10);
+    const before = state.employees.length;
+    state.employees = state.employees.filter(e => e.name.trim().toLowerCase() !== 'oksana');
+    if(state.employees.length !== before){
       await saveEmployees();
     }
   }
