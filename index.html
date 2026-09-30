@@ -423,7 +423,7 @@
 <div class="modal-backdrop" id="emailModalBackdrop">
   <div class="modal">
     <h3>Print &amp; email the schedule</h3>
-    <p class="note">This opens the print dialog for however many months are set in "Months to include" (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as BCC), plus the CC email set in the Employee panel (⚙ → + Employee) if you've added one, with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
+    <p class="note">This opens the print dialog for however many months are set in "Months to include" (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as To), plus the CC email set in the Employee panel (⚙ → + Employee) on CC if you've added one, with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
     <button id="emailGoBtn">Print PDF &amp; open email</button>
     <button id="emailCancelBtn">Cancel</button>
   </div>
@@ -1514,9 +1514,9 @@
     const body = encodeURIComponent('Hi all,\n\nAttached is the work schedule for ' + monthLabel + '.\n\nThanks.');
     setTimeout(()=>{
       // Employees go on BCC (matching the modal's own description above) so no one sees
-      // the whole distribution list; the manager's CC address (set in Settings, kept out
-      // of the Employee list entirely) rides along openly on CC.
-      let mailto = 'mailto:?bcc=' + encodeURIComponent(emails) + '&subject=' + subject + '&body=' + body;
+      // Employees go on "To"; the separate CC address (set in the Employee panel, kept
+      // out of the Employee list entirely) rides along on CC.
+      let mailto = 'mailto:?to=' + encodeURIComponent(emails) + '&subject=' + subject + '&body=' + body;
       if(ccEmail.trim()) mailto += '&cc=' + encodeURIComponent(ccEmail.trim());
       window.location.href = mailto;
     }, 400);
@@ -1760,6 +1760,25 @@
   const HR_RATE_DEFAULT = 817.812; // pulled from the source spreadsheet's per-day rate cell
   const HR_TARGET_NAME = 'Mario'; // exact match only — explicitly NOT "Mario F."
   const HR_MIN_YEAR = 2013;
+  // Opening vacation balance Mario gave directly: 36.7 days remaining as of end of day
+  // Aug 31, 2026. Everything from Sep 1, 2026 onward is tracked against this starting
+  // point (added when first missing; editable afterward like the rate below).
+  const HR_OPENING_DEFAULT = { days: 36.7, asOf: '2026-08-31' };
+
+  function countVacationDaysInRange(empId, startExclusiveISO, endInclusiveDate){
+    const start = new Date(startExclusiveISO + 'T00:00:00');
+    let d = new Date(start); d.setDate(d.getDate()+1);
+    let total = 0;
+    while(d <= endInclusiveDate){
+      const rec = getCell(d.getFullYear(), d.getMonth(), d.getDate(), empId);
+      if(rec){
+        if(rec.status==='VAC') total += 1;
+        else if(rec.status==='HALF' && rec.half==='VAC') total += 0.5;
+      }
+      d.setDate(d.getDate()+1);
+    }
+    return total;
+  }
 
   function computeHrStatsForYear(empId, year){
     const holidays = albertaHolidays(year);
@@ -1813,12 +1832,13 @@
       return;
     }
     body.innerHTML = '<p class="note">Loading…</p>';
-    const realToday = new Date();
+    const realToday = new Date(); realToday.setHours(0,0,0,0);
     const years = [];
-    for(let y=HR_MIN_YEAR; y<=realToday.getFullYear(); y++) years.push(y);
+    for(let y=HR_MIN_YEAR; y<=realToday.getFullYear()+1; y++) years.push(y);
     await Promise.all(years.map(y => ensureYearLoaded(y)));
 
-    const perYear = years.map(y => ({year:y, totals: computeHrStatsForYear(emp.id, y)}));
+    const perYear = years.filter(y=>y<=realToday.getFullYear())
+      .map(y => ({year:y, totals: computeHrStatsForYear(emp.id, y)}));
     const lifetime = perYear.reduce((acc, row) => addHrTotals(acc, row.totals), {work:0, weekend:0, vac:0, sick:0, unpaid:0});
 
     let storedRate = HR_RATE_DEFAULT;
@@ -1826,6 +1846,22 @@
       const raw = await storageGet('hrVacationRate', true);
       if(raw) storedRate = parseFloat(raw) || HR_RATE_DEFAULT;
     }catch(e){}
+
+    // Opening vacation balance: seed it once from HR_OPENING_DEFAULT if nothing's been
+    // saved yet, same pattern as the rate above.
+    let opening = HR_OPENING_DEFAULT;
+    try{
+      const raw = await storageGet('hrVacationOpening', true);
+      if(raw) opening = JSON.parse(raw);
+      else await storageSet('hrVacationOpening', JSON.stringify(HR_OPENING_DEFAULT), true);
+    }catch(e){}
+
+    // "Since" the opening balance's date, count every VAC/half-VAC day already on the
+    // calendar -- including ones booked for the future, since a booked future day is
+    // already committed against the balance, not just days already taken.
+    const scanEnd = new Date(realToday.getFullYear()+1, 11, 31);
+    const takenSinceOpening = countVacationDaysInRange(emp.id, opening.asOf, scanEnd);
+    const remaining = opening.days - takenSinceOpening;
 
     const rows = perYear.map(row => {
       const t = row.totals;
@@ -1838,25 +1874,56 @@
       rows +
       '<tr class="lifetime"><td>Lifetime</td><td>' + lifetime.work + '</td><td>' + lifetime.weekend + '</td><td>' + lifetime.vac + '</td><td>' + lifetime.sick + '</td><td>' + lifetime.unpaid + '</td></tr>' +
       '</tbody></table>' +
-      '<div class="note" style="margin-bottom:6px;">Estimated dollar value of lifetime vacation days — a simple days × rate calculation, shown transparently below. It is <em>not</em> a reproduction of the spreadsheet\'s multi-year banked-balance ledger (which carries a running balance forward year to year); it just prices out the vacation days recorded on this calendar.</div>' +
+      '<div class="note" style="margin:10px 0 6px;font-weight:600;color:var(--ink);">Vacation balance</div>' +
+      '<div class="note" style="margin-bottom:6px;">A running balance starting from an opening figure you gave directly, decreased by every vacation day (full or half) recorded on the calendar after that date — including days already booked for the future. This is a simple running total, not a reproduction of the spreadsheet\'s full multi-year accrual ledger (which also adds monthly accrued days).</div>' +
+      '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px;">' +
+        '<label style="font-size:12px;color:var(--grey-strong);">Opening balance (days)</label>' +
+        '<input type="number" id="hrOpeningDaysInput" step="0.1" value="' + opening.days + '" style="width:80px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
+        '<label style="font-size:12px;color:var(--grey-strong);">as of</label>' +
+        '<input type="date" id="hrOpeningDateInput" value="' + opening.asOf + '" style="padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
+      '</div>' +
+      '<div style="font-size:13px;margin-bottom:2px;" id="hrTakenSinceLine"></div>' +
+      '<div style="font-size:15px;font-weight:800;margin-bottom:10px;" id="hrRemainingLine"></div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
         '<label style="font-size:12px;color:var(--grey-strong);">Daily rate ($)</label>' +
         '<input type="number" id="hrRateInput" step="0.001" value="' + storedRate + '" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
       '</div>' +
       '<div style="font-size:15px;font-weight:800;" id="hrDollarValue"></div>';
 
-    function updateDollarValue(){
+    async function recomputeAndRender(){
+      const days = parseFloat(document.getElementById('hrOpeningDaysInput').value) || 0;
+      const asOf = document.getElementById('hrOpeningDateInput').value || HR_OPENING_DEFAULT.asOf;
+      const taken = countVacationDaysInRange(emp.id, asOf, scanEnd);
+      const rem = days - taken;
+      document.getElementById('hrTakenSinceLine').textContent =
+        'Vacation days recorded since ' + asOf + ': ' + taken;
+      document.getElementById('hrRemainingLine').textContent =
+        'Remaining balance: ' + rem.toFixed(2) + ' days';
+      updateDollarValue(rem);
+    }
+    function updateDollarValue(remainingDays){
       const rateInput = document.getElementById('hrRateInput');
       const rate = parseFloat(rateInput.value) || 0;
-      const val = lifetime.vac * rate;
+      const val = remainingDays * rate;
       document.getElementById('hrDollarValue').textContent =
-        lifetime.vac + ' vacation days × $' + rate.toFixed(3) + ' = $' + val.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+        remainingDays.toFixed(2) + ' remaining days × $' + rate.toFixed(3) + ' = $' + val.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
     }
-    document.getElementById('hrRateInput').oninput = updateDollarValue;
+    document.getElementById('hrOpeningDaysInput').oninput = recomputeAndRender;
+    document.getElementById('hrOpeningDaysInput').onblur = ()=>{
+      storageSet('hrVacationOpening', JSON.stringify({
+        days: parseFloat(document.getElementById('hrOpeningDaysInput').value) || 0,
+        asOf: document.getElementById('hrOpeningDateInput').value || HR_OPENING_DEFAULT.asOf
+      }), true);
+    };
+    document.getElementById('hrOpeningDateInput').onchange = ()=>{
+      recomputeAndRender();
+      document.getElementById('hrOpeningDaysInput').onblur();
+    };
+    document.getElementById('hrRateInput').oninput = recomputeAndRender;
     document.getElementById('hrRateInput').onblur = ()=>{
       storageSet('hrVacationRate', document.getElementById('hrRateInput').value, true);
     };
-    updateDollarValue();
+    await recomputeAndRender();
   }
 
   const hrReportBackdrop = document.getElementById('hrReportModalBackdrop');
