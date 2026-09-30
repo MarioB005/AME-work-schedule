@@ -85,9 +85,14 @@
     display:flex; flex-direction:column; gap:5px; padding:11px 16px; font-size:12px; min-width:180px;
   }
   .db-dropdown-row label{color:var(--grey-strong); font-weight:600;}
-  .db-dropdown-row select{
+  .db-dropdown-row select, .db-dropdown-row input{
     padding:6px 8px; border:1px solid var(--line); border-radius:7px; font-size:12.5px; background:var(--panel); color:var(--ink);
   }
+  .hr-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:10px;}
+  .hr-table th, .hr-table td{border:1px solid var(--line);padding:4px 7px;text-align:right;}
+  .hr-table th:first-child, .hr-table td:first-child{text-align:left;}
+  .hr-table thead th{background:var(--paper);font-weight:700;}
+  .hr-table tr.lifetime td{font-weight:800;border-top:2px solid #000;}
 
   .year-switch{display:flex;align-items:center;gap:8px;}
   .year-switch button{
@@ -299,6 +304,14 @@
       <div class="db-dropdown" id="gearDropdown">
         <button id="addEmpToggle">+ Employee</button>
         <button id="changePassBtn">Change password</button>
+        <button id="backupBtn">Backup data (download)</button>
+        <button id="restoreBtn">Restore from backup…</button>
+        <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
+        <div class="db-dropdown-row">
+          <label for="ccEmailInput">CC email for schedule (not shown on calendar)</label>
+          <input type="email" id="ccEmailInput" placeholder="name@company.com">
+        </div>
+        <button id="hrReportBtn">HR report (locked)</button>
         <div class="db-dropdown-row">
           <label for="sessionTimeoutSelect">Auto-lock after</label>
           <select id="sessionTimeoutSelect">
@@ -407,9 +420,26 @@
 <div class="modal-backdrop" id="emailModalBackdrop">
   <div class="modal">
     <h3>Print &amp; email the schedule</h3>
-    <p class="note">This opens the print dialog for however many months are set in "Months to include" (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as BCC), with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
+    <p class="note">This opens the print dialog for however many months are set in "Months to include" (choose "Save as PDF" there), then opens an email in your default mail app addressed to everyone in your employee list (as BCC), plus your CC email from Settings if you've set one, with the subject and message pre-filled. You'll still need to attach the saved PDF yourself — browsers can't do that step automatically.</p>
     <button id="emailGoBtn">Print PDF &amp; open email</button>
     <button id="emailCancelBtn">Cancel</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="hrReportModalBackdrop">
+  <div class="modal" style="max-width:520px;">
+    <h3 id="hrReportTitle">HR report — locked</h3>
+    <div id="hrGateSection">
+      <p class="note">This report is protected by its own separate password (not the schedule's password).</p>
+      <div class="gate-error" id="hrGateError"></div>
+      <input type="password" id="hrGatePass" placeholder="Password" autocomplete="off" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;">
+      <input type="password" id="hrGatePass2" placeholder="Confirm password" style="display:none;width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;" autocomplete="off">
+      <button id="hrGateBtn">Unlock</button>
+    </div>
+    <div id="hrReportSection" style="display:none;">
+      <div id="hrReportBody"></div>
+    </div>
+    <button id="hrReportCloseBtn">Close</button>
   </div>
 </div>
 
@@ -665,6 +695,7 @@
         {id:'e5',name:'Mario',email:''},
       ];
     }
+    await migrateRemoveOksana();
   }
   async function saveEmployees(){
     await storageSet('employees', JSON.stringify(state.employees), true);
@@ -1471,6 +1502,7 @@
     buildPrintArea();
     window.print();
     const emails = state.employees.map(e=>e.email).filter(Boolean).join(';');
+    const ccEmail = (await storageGet('scheduleCcEmail', true)) || '';
     const lastMonth = monthOffset(currentYear, currentMonth, monthCount-1);
     const monthLabel = monthCount===1
       ? MONTHS[currentMonth]
@@ -1478,7 +1510,12 @@
     const subject = encodeURIComponent(state.company + ' - ' + monthLabel + ' schedule');
     const body = encodeURIComponent('Hi all,\n\nAttached is the work schedule for ' + monthLabel + '.\n\nThanks.');
     setTimeout(()=>{
-      window.location.href = 'mailto:?to=' + encodeURIComponent(emails) + '&subject=' + subject + '&body=' + body;
+      // Employees go on BCC (matching the modal's own description above) so no one sees
+      // the whole distribution list; the manager's CC address (set in Settings, kept out
+      // of the Employee list entirely) rides along openly on CC.
+      let mailto = 'mailto:?bcc=' + encodeURIComponent(emails) + '&subject=' + subject + '&body=' + body;
+      if(ccEmail.trim()) mailto += '&cc=' + encodeURIComponent(ccEmail.trim());
+      window.location.href = mailto;
     }, 400);
   };
 
@@ -1628,10 +1665,264 @@
     location.reload();
   };
 
+  // ---------- CC email (kept out of the Employee list entirely) ----------
+  async function initCcEmail(){
+    const input = document.getElementById('ccEmailInput');
+    try{
+      const raw = await storageGet('scheduleCcEmail', true);
+      input.value = raw || '';
+    }catch(e){}
+    input.onblur = async ()=>{
+      await storageSet('scheduleCcEmail', input.value.trim(), true);
+    };
+  }
+
+  // ---------- Backup / Restore ----------
+  // Pulls every row this app has ever written to the shared key/value table (employees,
+  // company, every year's schedule, notes, the archive, passwords, profile, etc.) in one
+  // request, rather than guessing which years/keys exist — so a restore is a true full
+  // snapshot, not just whatever years happen to currently be loaded in memory.
+  async function fetchAllStorageRows(){
+    if(!SUPABASE_CONFIGURED) return null;
+    try{
+      const res = await fetch(SUPABASE_URL + '/rest/v1/app_data?select=key,value', {
+        headers: { apikey: SUPABASE_ANON_KEY }
+      });
+      if(res.ok) return await res.json();
+    }catch(e){}
+    return null;
+  }
+
+  document.getElementById('backupBtn').onclick = async ()=>{
+    const rows = await fetchAllStorageRows();
+    let payload;
+    if(rows){
+      const obj = {};
+      rows.forEach(r=>{ obj[r.key] = r.value; });
+      payload = obj;
+    } else {
+      // offline fallback: back up whatever's cached in this browser's localStorage
+      payload = {};
+      try{
+        for(let i=0;i<localStorage.length;i++){
+          const k = localStorage.key(i);
+          if(k && k.indexOf('cache:')===0) payload[k.slice(6)] = localStorage.getItem(k);
+        }
+      }catch(e){}
+    }
+    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data: payload }, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = 'work-schedule-backup-' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  };
+
+  document.getElementById('restoreBtn').onclick = ()=>{
+    document.getElementById('restoreFileInput').click();
+  };
+  document.getElementById('restoreFileInput').onchange = async (e)=>{
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if(!file) return;
+    let parsed;
+    try{
+      const text = await file.text();
+      parsed = JSON.parse(text);
+    }catch(err){
+      alert('That file could not be read as a backup (invalid JSON).');
+      return;
+    }
+    const data = parsed && parsed.data ? parsed.data : parsed;
+    if(!data || typeof data !== 'object'){
+      alert('That file does not look like a Work Schedule backup.');
+      return;
+    }
+    const keys = Object.keys(data);
+    if(!keys.length){ alert('That backup file is empty.'); return; }
+    if(!confirm('Restore ' + keys.length + ' item(s) from this backup? This overwrites the matching data currently saved (employees, schedules, notes, passwords, etc.) and cannot be undone.')) return;
+    for(const k of keys){
+      const v = data[k];
+      await storageSet(k, typeof v === 'string' ? v : JSON.stringify(v), true);
+    }
+    alert('Restore complete. Reloading…');
+    location.reload();
+  };
+
+  // ---------- HR report (separately password-locked; Mario only, not "Mario F.") ----------
+  const HR_RATE_DEFAULT = 817.812; // pulled from the source spreadsheet's per-day rate cell
+  const HR_TARGET_NAME = 'Mario'; // exact match only — explicitly NOT "Mario F."
+  const HR_MIN_YEAR = 2013;
+
+  function computeHrStatsForYear(empId, year){
+    const holidays = albertaHolidays(year);
+    const realToday = new Date(); realToday.setHours(0,0,0,0);
+    const isCurrentYear = year === realToday.getFullYear();
+    const lastDate = isCurrentYear ? realToday : new Date(year, 11, 31);
+    const totals = {work:0, weekend:0, vac:0, sick:0, unpaid:0};
+    if(year > realToday.getFullYear()) return totals;
+    let d = new Date(year, 0, 1);
+    while(d <= lastDate){
+      const month = d.getMonth(), day = d.getDate();
+      const weekend = isWeekend(d);
+      const isHoliday = !!holidays[fmtKey(d)];
+      const rec = getCell(year, month, day, empId);
+      const status = rec ? rec.status : null;
+      const half = rec ? (rec.half || null) : null;
+      if(status===null){
+        if(weekend || isHoliday) totals.weekend++; else totals.work++;
+      } else if(status==='WORK'){
+        totals.work++;
+      } else if(status==='STAT'){
+        totals.weekend++;
+      } else if(status==='OFF'){
+        totals.weekend++;
+      } else if(status==='VAC'){
+        totals.vac++;
+      } else if(status==='SICK'){
+        totals.sick++;
+      } else if(status==='UNPAID'){
+        totals.unpaid++;
+      } else if(status==='HALF'){
+        totals.work += 0.5;
+        if(half==='SICK') totals.sick += 0.5;
+        else if(half==='VAC') totals.vac += 0.5;
+        else totals.weekend += 0.5;
+      }
+      d.setDate(d.getDate()+1);
+    }
+    return totals;
+  }
+
+  function addHrTotals(a, b){
+    return {work:a.work+b.work, weekend:a.weekend+b.weekend, vac:a.vac+b.vac, sick:a.sick+b.sick, unpaid:a.unpaid+b.unpaid};
+  }
+
+  async function renderHrReport(){
+    const body = document.getElementById('hrReportBody');
+    const emp = state.employees.find(e => e.name.trim() === HR_TARGET_NAME);
+    if(!emp){
+      body.innerHTML = '<p class="note">No employee named exactly "' + HR_TARGET_NAME + '" was found in the employee list.</p>';
+      return;
+    }
+    body.innerHTML = '<p class="note">Loading…</p>';
+    const realToday = new Date();
+    const years = [];
+    for(let y=HR_MIN_YEAR; y<=realToday.getFullYear(); y++) years.push(y);
+    await Promise.all(years.map(y => ensureYearLoaded(y)));
+
+    const perYear = years.map(y => ({year:y, totals: computeHrStatsForYear(emp.id, y)}));
+    const lifetime = perYear.reduce((acc, row) => addHrTotals(acc, row.totals), {work:0, weekend:0, vac:0, sick:0, unpaid:0});
+
+    let storedRate = HR_RATE_DEFAULT;
+    try{
+      const raw = await storageGet('hrVacationRate', true);
+      if(raw) storedRate = parseFloat(raw) || HR_RATE_DEFAULT;
+    }catch(e){}
+
+    const rows = perYear.map(row => {
+      const t = row.totals;
+      return '<tr><td>' + row.year + '</td><td>' + t.work + '</td><td>' + t.weekend + '</td><td>' + t.vac + '</td><td>' + t.sick + '</td><td>' + t.unpaid + '</td></tr>';
+    }).join('');
+
+    body.innerHTML =
+      '<p class="note">Counts below come straight from ' + emp.name + '\'s calendar entries (Jan 1 through today for the current year). Weekend/Stat includes weekends, Alberta general holidays, and explicit "Weekend / Stat" overrides.</p>' +
+      '<table class="hr-table"><thead><tr><th>Year</th><th>On</th><th>Weekend/Stat</th><th>Vac</th><th>Sick</th><th>Unpaid</th></tr></thead><tbody>' +
+      rows +
+      '<tr class="lifetime"><td>Lifetime</td><td>' + lifetime.work + '</td><td>' + lifetime.weekend + '</td><td>' + lifetime.vac + '</td><td>' + lifetime.sick + '</td><td>' + lifetime.unpaid + '</td></tr>' +
+      '</tbody></table>' +
+      '<div class="note" style="margin-bottom:6px;">Estimated dollar value of lifetime vacation days — a simple days × rate calculation, shown transparently below. It is <em>not</em> a reproduction of the spreadsheet\'s multi-year banked-balance ledger (which carries a running balance forward year to year); it just prices out the vacation days recorded on this calendar.</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+        '<label style="font-size:12px;color:var(--grey-strong);">Daily rate ($)</label>' +
+        '<input type="number" id="hrRateInput" step="0.001" value="' + storedRate + '" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
+      '</div>' +
+      '<div style="font-size:15px;font-weight:800;" id="hrDollarValue"></div>';
+
+    function updateDollarValue(){
+      const rateInput = document.getElementById('hrRateInput');
+      const rate = parseFloat(rateInput.value) || 0;
+      const val = lifetime.vac * rate;
+      document.getElementById('hrDollarValue').textContent =
+        lifetime.vac + ' vacation days × $' + rate.toFixed(3) + ' = $' + val.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    }
+    document.getElementById('hrRateInput').oninput = updateDollarValue;
+    document.getElementById('hrRateInput').onblur = ()=>{
+      storageSet('hrVacationRate', document.getElementById('hrRateInput').value, true);
+    };
+    updateDollarValue();
+  }
+
+  const hrReportBackdrop = document.getElementById('hrReportModalBackdrop');
+  document.getElementById('hrReportBtn').onclick = async ()=>{
+    gearDropdown.classList.remove('show');
+    const gateSection = document.getElementById('hrGateSection');
+    const reportSection = document.getElementById('hrReportSection');
+    const title = document.getElementById('hrReportTitle');
+    const err = document.getElementById('hrGateError');
+    const p1 = document.getElementById('hrGatePass');
+    const p2 = document.getElementById('hrGatePass2');
+    const btn = document.getElementById('hrGateBtn');
+    p1.value = ''; p2.value = ''; err.textContent = '';
+    gateSection.style.display = 'block';
+    reportSection.style.display = 'none';
+
+    const existingHash = await storageGet('hrReportPasswordHash', true);
+    const settingUp = !existingHash;
+    title.textContent = settingUp ? 'Set HR report password' : 'HR report — locked';
+    p2.style.display = settingUp ? 'block' : 'none';
+    btn.textContent = settingUp ? 'Set password' : 'Unlock';
+
+    hrReportBackdrop.classList.add('show');
+    setTimeout(()=>p1.focus(), 50);
+
+    btn.onclick = async ()=>{
+      err.textContent = '';
+      if(settingUp){
+        if(!p1.value || p1.value.length<4){ err.textContent='Use at least 4 characters.'; return; }
+        if(p1.value !== p2.value){ err.textContent='Passwords do not match.'; return; }
+        const hash = await sha256(p1.value);
+        await storageSet('hrReportPasswordHash', hash, true);
+        gateSection.style.display = 'none';
+        reportSection.style.display = 'block';
+        title.textContent = 'HR report — ' + HR_TARGET_NAME;
+        await renderHrReport();
+      } else {
+        const hash = await sha256(p1.value);
+        if(hash === existingHash){
+          gateSection.style.display = 'none';
+          reportSection.style.display = 'block';
+          title.textContent = 'HR report — ' + HR_TARGET_NAME;
+          await renderHrReport();
+        } else {
+          err.textContent = 'Incorrect password.'; p1.value='';
+        }
+      }
+    };
+    p1.onkeydown = (e)=>{ if(e.key==='Enter') btn.click(); };
+  };
+  document.getElementById('hrReportCloseBtn').onclick = ()=>{ hrReportBackdrop.classList.remove('show'); };
+
+  // ---------- one-time migration: drop "Oksana" from the active employee list ----------
+  // She stays visible on any past months she actually worked (same mechanism as the
+  // regular Remove button), just like removing anyone else from Settings would do.
+  async function migrateRemoveOksana(){
+    const oksana = state.employees.find(e => e.active !== false && e.name.trim().toLowerCase() === 'oksana');
+    if(oksana){
+      oksana.active = false;
+      oksana.removedDate = oksana.removedDate || new Date().toISOString().slice(0,10);
+      await saveEmployees();
+    }
+  }
+
   // init
   initGate();
   loadManagerProfile().then(applyProfileToBanner);
   initShiftTimes();
+  initCcEmail();
 })();
 </script>
 </body>
