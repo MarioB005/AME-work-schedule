@@ -368,6 +368,7 @@
         <div class="field"><label>Name</label><input id="newEmpName" placeholder="e.g. Randy"></div>
         <div class="field"><label>Email</label><input id="newEmpEmail" placeholder="name@company.com"></div>
         <div class="field"><label>Start date (optional)</label><input id="newEmpStart" type="date"></div>
+        <div class="field"><label>Vacation days/year</label><input id="newEmpVacDays" type="number" min="0" step="0.5" placeholder="30"></div>
         <button id="addEmpBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--line);cursor:pointer;">Add</button>
       </div>
       <div class="emp-list" id="empList"></div>
@@ -433,7 +434,7 @@
 </div>
 
 <div class="modal-backdrop" id="summaryModalBackdrop">
-  <div class="modal" style="max-width:420px;">
+  <div class="modal" style="max-width:760px;">
     <h3>Employee summary</h3>
     <div class="field" style="margin-bottom:12px;">
       <label style="font-size:11px;color:var(--grey-strong);">Employee</label><br>
@@ -454,7 +455,7 @@
 </div>
 
 <div class="modal-backdrop" id="hrReportModalBackdrop">
-  <div class="modal" style="max-width:520px;">
+  <div class="modal" style="max-width:820px;">
     <h3 id="hrReportTitle">HR report — locked</h3>
     <div id="hrGateSection">
       <p class="note">This report is protected by its own separate password (not the schedule's password).</p>
@@ -500,6 +501,15 @@
     </div>
 
     <button id="usersCloseBtn">Close</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="adminNotifModalBackdrop">
+  <div class="modal" style="max-width:540px;max-height:85vh;overflow-y:auto;">
+    <h3>What changed since you were last here</h3>
+    <p class="note">Changes made by other users, shown once to each administrator.</p>
+    <div id="adminNotifBody"></div>
+    <button id="adminNotifOkBtn" style="margin-top:10px;">Got it</button>
   </div>
 </div>
 
@@ -873,6 +883,7 @@
       applyPermissionsToUI();
       loadState().then(renderAll);
       initAutoLock();
+      maybeShowAdminNotifications(user);
     }
 
     // A real <form> submit (rather than a plain button click handler) is what lets browsers
@@ -1466,7 +1477,7 @@
         if(isPastDate(year, month, d)){
           pastEntries.push({ts:new Date().toISOString(), month, day:d, empId, empName: emp?emp.name:empId, before:prev, after:next});
         }
-        changeEntries.push({ts:new Date().toISOString(), type:'schedule', month, day:d, empName: emp?emp.name:empId, before: describeCellValue(prev), after: describeCellValue(next)});
+        changeEntries.push({ts:new Date().toISOString(), type:'schedule', month, day:d, empName: emp?emp.name:empId, before: describeCellValue(prev), after: describeCellValue(next), by: currentUser ? currentUser.name : null});
         setCellLocal(year, month, d, empId, next);
       }
     }
@@ -1551,6 +1562,11 @@
         startInput.value = emp.hiredDate || '';
         startInput.title = 'Start date (optional)';
         startInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;';
+        const vacDaysInput = document.createElement('input');
+        vacDaysInput.type = 'number'; vacDaysInput.min = '0'; vacDaysInput.step = '0.5';
+        vacDaysInput.value = empVacationDaysPerYear(emp);
+        vacDaysInput.title = 'Vacation days/year';
+        vacDaysInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;width:60px;';
         const saveBtn = document.createElement('button');
         saveBtn.textContent = 'Save'; saveBtn.style.color = 'var(--green-strong)';
         saveBtn.onclick = ()=>{
@@ -1560,6 +1576,8 @@
           emp.name = newName;
           emp.email = emailInput.value.trim();
           emp.hiredDate = startInput.value || null;
+          const vacDaysRaw = vacDaysInput.value.trim();
+          emp.vacationDaysPerYear = vacDaysRaw === '' ? DEFAULT_VACATION_DAYS_PER_YEAR : (parseFloat(vacDaysRaw) || 0);
           editingEmpId = null;
           saveEmployees();
           logEmployeeChange('edited', newName);
@@ -1569,11 +1587,11 @@
         cancelBtn.textContent = 'Cancel';
         cancelBtn.onclick = ()=>{ editingEmpId = null; renderAll(); };
 
-        row.appendChild(nameInput); row.appendChild(emailInput); row.appendChild(startInput); row.appendChild(saveBtn); row.appendChild(cancelBtn);
+        row.appendChild(nameInput); row.appendChild(emailInput); row.appendChild(startInput); row.appendChild(vacDaysInput); row.appendChild(saveBtn); row.appendChild(cancelBtn);
       } else {
         const name = document.createElement('span'); name.className='name'; name.textContent = emp.name;
         const email = document.createElement('span'); email.className='email';
-        email.textContent = (emp.email || '(no email)') + (emp.hiredDate ? (' — starts ' + emp.hiredDate) : '');
+        email.textContent = (emp.email || '(no email)') + (emp.hiredDate ? (' — starts ' + emp.hiredDate) : '') + ' — ' + empVacationDaysPerYear(emp) + ' vac days/yr';
         const edit = document.createElement('button'); edit.textContent='Edit'; edit.style.color = 'var(--blue-past-strong)';
         edit.onclick = ()=>{ editingEmpId = emp.id; renderAll(); };
         const del = document.createElement('button'); del.textContent='Remove';
@@ -1691,7 +1709,7 @@
     p.style.display = p.style.display==='none' ? 'block':'none';
   };
   async function logEmployeeChange(action, name, detail){
-    await appendChangeLog(currentYear, [{ts:new Date().toISOString(), type:'employee', action, empName:name, detail: detail||''}]);
+    await appendChangeLog(currentYear, [{ts:new Date().toISOString(), type:'employee', action, empName:name, detail: detail||'', by: currentUser ? currentUser.name : null}]);
   }
 
   document.getElementById('addEmpBtn').onclick = ()=>{
@@ -1699,11 +1717,14 @@
     const name = document.getElementById('newEmpName').value.trim();
     const email = document.getElementById('newEmpEmail').value.trim();
     const startDate = document.getElementById('newEmpStart').value; // yyyy-mm-dd or ''
+    const vacDaysRaw = document.getElementById('newEmpVacDays').value.trim();
+    const vacDays = vacDaysRaw === '' ? DEFAULT_VACATION_DAYS_PER_YEAR : (parseFloat(vacDaysRaw) || 0);
     if(!name) return;
-    state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null});
+    state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null, vacationDaysPerYear: vacDays});
     document.getElementById('newEmpName').value='';
     document.getElementById('newEmpEmail').value='';
     document.getElementById('newEmpStart').value='';
+    document.getElementById('newEmpVacDays').value='';
     saveEmployees();
     logEmployeeChange('added', name);
     renderAll();
@@ -1812,7 +1833,7 @@
       const rows = await computeYearlyLedger(empId, year, overrides);
       results.innerHTML =
         '<h4 style="margin:10px 0 6px;">' + emp.name + ' — ' + year + '</h4>' +
-        '<p class="note" style="margin-bottom:8px;">On/Weekend-Stat/Sick/Unpaid are counted through today; months not yet reached show zero there. Vac includes vacation days already booked for later months too, since those already reduce the balance below. Vacation balance accrues ' + VACATION_ACCRUAL_PER_MONTH + ' days/month; click an ending figure to correct it.</p>' +
+        '<p class="note" style="margin-bottom:8px;">On/Weekend-Stat/Sick/Unpaid are counted through today; months not yet reached show zero there. Vac includes vacation days already booked for later months too, since those already reduce the balance below. Vacation balance: ' + empVacationDaysPerYear(emp) + ' days/year (set in the Employee panel), accruing ' + (empVacationDaysPerYear(emp)/12).toFixed(2) + ' days/month; click an ending figure to correct it.</p>' +
         renderLedgerTableHtml(rows, {editable:true});
       wireLedgerOverrideInputs(results, empId, year, draw);
     }
@@ -1885,6 +1906,69 @@
     if(schedLines.length) text += 'Schedule changes:\n' + schedLines.join('\n') + '\n\n';
     if(empLines.length) text += 'Employee changes:\n' + empLines.join('\n') + '\n\n';
     return text;
+  }
+
+  function escapeHtml(s){
+    return String(s==null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ---------- admin "what changed" notifications ----------
+  // Whenever someone with Administrator permission logs in, show them (once, in a
+  // popup) everything logged since they last saw this -- schedule edits and employee
+  // list changes alike -- made by someone OTHER than themselves. Reuses the same
+  // changeLog entries the Print & Email "what changed" summary already builds from,
+  // just with a `by` field added so entries can be attributed and self-filtered.
+  function adminNotifSeenKey(userId){ return 'adminNotifSeen:' + userId; }
+
+  async function collectUnseenChangesForAdmin(user){
+    const seenRaw = await storageGet(adminNotifSeenKey(user.id), true);
+    const years = Array.from(new Set([currentYear, currentYear - 1]));
+    let entries = [];
+    for(const y of years){
+      try{
+        const raw = await storageGet('changeLog:'+y, true);
+        const arr = raw ? JSON.parse(raw) : [];
+        entries.push(...arr);
+      }catch(e){}
+    }
+    entries = entries.filter(e => e.by && e.by !== user.name && (!seenRaw || e.ts > seenRaw));
+    entries.sort((a,b)=> a.ts < b.ts ? -1 : (a.ts > b.ts ? 1 : 0));
+    return { entries, firstRun: !seenRaw };
+  }
+
+  async function markAdminNotifsSeen(user){
+    await storageSet(adminNotifSeenKey(user.id), new Date().toISOString(), true);
+  }
+
+  function formatNotifEntry(e){
+    if(e.type === 'schedule'){
+      return escapeHtml(MONTHS[e.month] + ' ' + e.day + ' — ' + e.empName + ': ' + e.before + ' → ' + e.after + ' (by ' + e.by + ')');
+    }
+    const verb = e.action==='added' ? 'Added' : e.action==='removed' ? 'Removed' : e.action==='restored' ? 'Restored' : 'Edited';
+    return escapeHtml(verb + ' employee: ' + e.empName + ' (by ' + e.by + ')');
+  }
+
+  async function maybeShowAdminNotifications(user){
+    if(!user.permissions || !user.permissions.isAdmin) return;
+    const { entries, firstRun } = await collectUnseenChangesForAdmin(user);
+    if(firstRun){
+      // First time this runs for this admin account: just establish a baseline rather
+      // than surfacing the entire pre-existing change history as if it were new.
+      await markAdminNotifsSeen(user);
+      return;
+    }
+    if(!entries.length) return;
+    const schedLines = entries.filter(e=>e.type==='schedule').map(formatNotifEntry);
+    const empLines = entries.filter(e=>e.type==='employee').map(formatNotifEntry);
+    let html = '';
+    if(schedLines.length) html += '<div style="font-weight:700;margin-bottom:4px;">Schedule changes</div><div class="note" style="white-space:pre-line;margin-bottom:10px;">' + schedLines.join('\n') + '</div>';
+    if(empLines.length) html += '<div style="font-weight:700;margin-bottom:4px;">Employee changes</div><div class="note" style="white-space:pre-line;">' + empLines.join('\n') + '</div>';
+    document.getElementById('adminNotifBody').innerHTML = html;
+    document.getElementById('adminNotifModalBackdrop').classList.add('show');
+    document.getElementById('adminNotifOkBtn').onclick = async ()=>{
+      await markAdminNotifsSeen(user);
+      document.getElementById('adminNotifModalBackdrop').classList.remove('show');
+    };
   }
 
   const emailBackdrop = document.getElementById('emailModalBackdrop');
@@ -2325,7 +2409,15 @@
   // Used by both the password-locked HR report (Mario only, includes the dollar value)
   // and the Employee summary (any employee, no dollar value). Same table shape, same
   // accrual/override math -- just rendered with or without the $ line.
-  const VACATION_ACCRUAL_PER_MONTH = 2.5; // 30 days/year ÷ 12
+  const DEFAULT_VACATION_DAYS_PER_YEAR = 30; // used whenever an employee has no figure of their own set
+
+  // Each employee can be given their own annual vacation-day entitlement (Employee
+  // panel); employees from before that existed, or with nothing entered, fall back to
+  // the default above rather than being left unset.
+  function empVacationDaysPerYear(emp){
+    const v = emp && emp.vacationDaysPerYear;
+    return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : DEFAULT_VACATION_DAYS_PER_YEAR;
+  }
 
   // Day-type counts for one employee for one month (On/Weekend-Stat/Vac/Sick/Unpaid).
   // Work/Weekend/Sick/Unpaid are capped at today: a month that hasn't started yet shows
@@ -2398,12 +2490,15 @@
   }
 
   // Builds the 12-month ledger for one employee/year: day-type totals plus a running
-  // vacation balance (beginning/end of each month) that accrues VACATION_ACCRUAL_PER_MONTH
-  // automatically and is reduced by any VAC/half-VAC day recorded that month. Any month's
-  // ending balance can carry a manual correction; once set, every later month continues
-  // the running calculation from that corrected figure instead of the computed one.
+  // vacation balance (beginning/end of each month) that accrues this employee's own
+  // annual entitlement (set in the Employee panel, or the default) ÷ 12 automatically,
+  // and is reduced by any VAC/half-VAC day recorded that month. Any month's ending
+  // balance can carry a manual correction; once set, every later month continues the
+  // running calculation from that corrected figure instead of the computed one.
   async function computeYearlyLedger(empId, year, overrides){
     await ensureYearLoaded(year);
+    const emp = state.employees.find(e=>e.id===empId);
+    const accrualPerMonth = empVacationDaysPerYear(emp) / 12;
     let running = null; // unknown until an override establishes a starting point
     const rows = [];
     for(let m=0; m<12; m++){
@@ -2413,7 +2508,7 @@
       const vacThisMonth = countVacationDaysInMonth(empId, year, m);
       let end;
       if(hasOverride){ end = overrides[key]; }
-      else if(running !== null){ end = running + VACATION_ACCRUAL_PER_MONTH - vacThisMonth; }
+      else if(running !== null){ end = running + accrualPerMonth - vacThisMonth; }
       else { end = null; }
       running = end;
       rows.push({ month:m, begin, end, overridden:hasOverride, overrideKey:key, dayStats: computeDayStatsForMonth(empId, year, m) });
@@ -2424,6 +2519,14 @@
   // Renders the shared monthly table. When opts.editable, each month's ending balance is
   // an input (a correction); otherwise it's plain text. Totals row sums the day-type
   // columns only (a balance isn't something you add across months).
+  function formatDollar(n){
+    return '$' + n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  // opts.showDollar adds a trailing "Vac. value ($)" column -- each month's ending
+  // balance times opts.dailyRate -- used only by the HR report (Mario only), never by
+  // the Employee summary. Each dollar cell carries the raw end-of-month balance in
+  // data-end so updateLedgerDollarColumn can recompute the whole column instantly as
+  // the rate is edited, without rebuilding the table (which would drop input focus).
   function renderLedgerTableHtml(rows, opts){
     opts = opts || {};
     let totalWork=0, totalWeekend=0, totalVac=0, totalSick=0, totalUnpaid=0;
@@ -2438,12 +2541,28 @@
       } else {
         endCell = (r.end===null ? '—' : r.end.toFixed(2));
       }
-      return '<tr><td>' + MONTHS[r.month] + '</td><td>' + r.dayStats.work + '</td><td>' + r.dayStats.weekend + '</td><td>' + r.dayStats.vac + '</td><td>' + r.dayStats.sick + '</td><td>' + r.dayStats.unpaid + '</td><td>' + beginTxt + '</td><td>' + endCell + '</td></tr>';
+      let dollarCell = '';
+      if(opts.showDollar){
+        const dollarTxt = r.end===null ? '—' : formatDollar(r.end * opts.dailyRate);
+        dollarCell = '<td class="ledger-dollar-cell" data-end="' + (r.end===null ? '' : r.end) + '">' + dollarTxt + '</td>';
+      }
+      return '<tr><td>' + MONTHS[r.month] + '</td><td>' + r.dayStats.work + '</td><td>' + r.dayStats.weekend + '</td><td>' + r.dayStats.vac + '</td><td>' + r.dayStats.sick + '</td><td>' + r.dayStats.unpaid + '</td><td>' + beginTxt + '</td><td>' + endCell + '</td>' + dollarCell + '</tr>';
     }).join('');
-    return '<table class="hr-table"><thead><tr><th>Month</th><th>On</th><th>Weekend/Stat</th><th>Vac</th><th>Sick</th><th>Unpaid</th><th>Vac. balance (start)</th><th>Vac. balance (end)' + (opts.editable ? ' — click to correct' : '') + '</th></tr></thead><tbody>' +
+    const dollarHeader = opts.showDollar ? '<th>Vac. value ($)</th>' : '';
+    const dollarTotalCell = opts.showDollar ? '<td></td>' : '';
+    return '<table class="hr-table"><thead><tr><th>Month</th><th>On</th><th>Weekend/Stat</th><th>Vac</th><th>Sick</th><th>Unpaid</th><th>Vac. balance (start)</th><th>Vac. balance (end)' + (opts.editable ? ' — click to correct' : '') + '</th>' + dollarHeader + '</tr></thead><tbody>' +
       bodyRows +
-      '<tr class="lifetime"><td>Total</td><td>' + totalWork + '</td><td>' + totalWeekend + '</td><td>' + totalVac + '</td><td>' + totalSick + '</td><td>' + totalUnpaid + '</td><td></td><td></td></tr>' +
+      '<tr class="lifetime"><td>Total</td><td>' + totalWork + '</td><td>' + totalWeekend + '</td><td>' + totalVac + '</td><td>' + totalSick + '</td><td>' + totalUnpaid + '</td><td></td><td></td>' + dollarTotalCell + '</tr>' +
       '</tbody></table>';
+  }
+  // Recomputes every "Vac. value ($)" cell in a just-rendered HR report table for a new
+  // rate, without rebuilding the table -- rebuilding on every keystroke would destroy
+  // and recreate the rate <input> itself, dropping focus mid-type.
+  function updateLedgerDollarColumn(container, rate){
+    container.querySelectorAll('.ledger-dollar-cell').forEach(cell=>{
+      const end = cell.dataset.end;
+      cell.textContent = end === '' ? '—' : formatDollar(parseFloat(end) * rate);
+    });
   }
 
   // Wires up the inline override inputs in a just-rendered ledger table: editing one
@@ -2507,33 +2626,24 @@
     async function draw(){
       const overridesNow = await loadLedgerOverrides();
       const rows = await computeYearlyLedger(emp.id, year, overridesNow);
-      const nowIdx = new Date().getMonth();
-      const currentBalance = rows[nowIdx].end;
+      const rateNow = parseFloat(storedRate) || 0;
 
       body.innerHTML =
         '<p class="note">Counts below come straight from ' + emp.name + '\'s calendar entries for ' + year + '. On/Weekend-Stat/Sick/Unpaid are counted through today (months not yet reached show zero there); Vac includes vacation days already booked for later months too, since those already reduce the balance below. Weekend/Stat includes weekends, Alberta general holidays, and explicit "Weekend / Stat" overrides.</p>' +
-        renderLedgerTableHtml(rows, {editable:true}) +
-        '<div class="note" style="margin:10px 0 6px;">Vacation balance: 30 days/year, accruing ' + VACATION_ACCRUAL_PER_MONTH + ' days each month, reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Click into any month\'s ending figure to correct it directly; later months then calculate forward from your correction. Clear a box to return to the automatic calculation.</div>' +
-        '<div style="font-size:15px;font-weight:800;margin-bottom:10px;">Balance as of today (end of ' + MONTHS[nowIdx] + '): ' + (currentBalance===null ? '—' : currentBalance.toFixed(2) + ' days') + '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
           '<label style="font-size:12px;color:var(--grey-strong);">Daily rate ($)</label>' +
           '<input type="number" id="hrRateInput" step="0.001" value="' + storedRate + '" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
         '</div>' +
-        '<div style="font-size:15px;font-weight:800;" id="hrDollarValue"></div>';
+        renderLedgerTableHtml(rows, {editable:true, showDollar:true, dailyRate:rateNow}) +
+        '<div class="note" style="margin:10px 0 6px;">Vacation balance: ' + empVacationDaysPerYear(emp) + ' days/year (set in the Employee panel), accruing ' + (empVacationDaysPerYear(emp)/12).toFixed(2) + ' days each month, reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Click into any month\'s ending figure to correct it directly; later months then calculate forward from your correction. Clear a box to return to the automatic calculation. "Vac. value ($)" is that month\'s ending balance × the daily rate above.</div>';
 
-      function updateDollarValue(){
-        const rateInput = document.getElementById('hrRateInput');
-        const rate = parseFloat(rateInput.value) || 0;
-        const bal = currentBalance || 0;
-        const val = bal * rate;
-        document.getElementById('hrDollarValue').textContent =
-          bal.toFixed(2) + ' current days × $' + rate.toFixed(3) + ' = $' + val.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-      }
-      document.getElementById('hrRateInput').oninput = updateDollarValue;
+      document.getElementById('hrRateInput').oninput = (e)=>{
+        storedRate = e.target.value;
+        updateLedgerDollarColumn(body, parseFloat(storedRate) || 0);
+      };
       document.getElementById('hrRateInput').onblur = ()=>{
         storageSet('hrVacationRate', document.getElementById('hrRateInput').value, true);
       };
-      updateDollarValue();
 
       wireLedgerOverrideInputs(body, emp.id, year, draw);
     }
