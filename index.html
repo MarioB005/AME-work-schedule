@@ -1812,7 +1812,7 @@
       const rows = await computeYearlyLedger(empId, year, overrides);
       results.innerHTML =
         '<h4 style="margin:10px 0 6px;">' + emp.name + ' — ' + year + '</h4>' +
-        '<p class="note" style="margin-bottom:8px;">Each month counted through today; months not yet reached show zero. Vacation balance accrues ' + VACATION_ACCRUAL_PER_MONTH + ' days/month; click an ending figure to correct it.</p>' +
+        '<p class="note" style="margin-bottom:8px;">On/Weekend-Stat/Sick/Unpaid are counted through today; months not yet reached show zero there. Vac includes vacation days already booked for later months too, since those already reduce the balance below. Vacation balance accrues ' + VACATION_ACCRUAL_PER_MONTH + ' days/month; click an ending figure to correct it.</p>' +
         renderLedgerTableHtml(rows, {editable:true});
       wireLedgerOverrideInputs(results, empId, year, draw);
     }
@@ -2328,14 +2328,17 @@
   const VACATION_ACCRUAL_PER_MONTH = 2.5; // 30 days/year ÷ 12
 
   // Day-type counts for one employee for one month (On/Weekend-Stat/Vac/Sick/Unpaid).
-  // Capped at today: a month that hasn't started yet shows all zeros, and the current
-  // month only counts through today, so nothing in the future is counted as if it
-  // already happened (future-booked VACATION days are still picked up separately below,
-  // for the balance projection, since a booked day is already committed either way).
+  // Work/Weekend/Sick/Unpaid are capped at today: a month that hasn't started yet shows
+  // zero for those, and the current month only counts through today, so nothing in the
+  // future is counted as if it already happened. Vac is the one exception, and is NOT
+  // capped -- it always equals countVacationDaysInMonth (full month, past and future),
+  // the same figure the balance calculation below subtracts. The two used to disagree
+  // (this display capped at today, the balance didn't), which made the balance appear
+  // to drop with no visible vacation day to explain it; keeping them identical fixes that.
   function computeDayStatsForMonth(empId, year, month){
     const holidays = albertaHolidays(year);
     const realToday = new Date(); realToday.setHours(0,0,0,0);
-    const totals = {work:0, weekend:0, vac:0, sick:0, unpaid:0};
+    const totals = {work:0, weekend:0, vac: countVacationDaysInMonth(empId, year, month), sick:0, unpaid:0};
     if(new Date(year, month, 1) > realToday) return totals;
     const nDays = daysInMonth(year, month);
     const lastDay = (year===realToday.getFullYear() && month===realToday.getMonth()) ? realToday.getDate() : nDays;
@@ -2351,13 +2354,13 @@
       } else if(status==='WORK'){ totals.work++; }
       else if(status==='STAT'){ totals.weekend++; }
       else if(status==='OFF'){ totals.weekend++; }
-      else if(status==='VAC'){ totals.vac++; }
+      else if(status==='VAC'){ /* already counted above, uncapped */ }
       else if(status==='SICK'){ totals.sick++; }
       else if(status==='UNPAID'){ totals.unpaid++; }
       else if(status==='HALF'){
         totals.work += 0.5;
         if(half==='SICK') totals.sick += 0.5;
-        else if(half==='VAC') totals.vac += 0.5;
+        else if(half==='VAC'){ /* already counted above, uncapped */ }
         else totals.weekend += 0.5;
       }
     }
@@ -2508,7 +2511,7 @@
       const currentBalance = rows[nowIdx].end;
 
       body.innerHTML =
-        '<p class="note">Counts below come straight from ' + emp.name + '\'s calendar entries for ' + year + ' (each month counted through today; months not yet reached show zero). Weekend/Stat includes weekends, Alberta general holidays, and explicit "Weekend / Stat" overrides.</p>' +
+        '<p class="note">Counts below come straight from ' + emp.name + '\'s calendar entries for ' + year + '. On/Weekend-Stat/Sick/Unpaid are counted through today (months not yet reached show zero there); Vac includes vacation days already booked for later months too, since those already reduce the balance below. Weekend/Stat includes weekends, Alberta general holidays, and explicit "Weekend / Stat" overrides.</p>' +
         renderLedgerTableHtml(rows, {editable:true}) +
         '<div class="note" style="margin:10px 0 6px;">Vacation balance: 30 days/year, accruing ' + VACATION_ACCRUAL_PER_MONTH + ' days each month, reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Click into any month\'s ending figure to correct it directly; later months then calculate forward from your correction. Clear a box to return to the automatic calculation.</div>' +
         '<div style="font-size:15px;font-weight:800;margin-bottom:10px;">Balance as of today (end of ' + MONTHS[nowIdx] + '): ' + (currentBalance===null ? '—' : currentBalance.toFixed(2) + ' days') + '</div>' +
