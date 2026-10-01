@@ -1569,12 +1569,22 @@
         startInput.title = 'Start date (optional)';
         startInput.disabled = !canManage;
         startInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;' + (canManage ? '' : 'opacity:.5;');
+        // This field always edits the CURRENTLY VIEWED year's allocation (the main
+        // calendar's year switcher), not a single flat number for all time. Left blank,
+        // it shows (via placeholder) what the employee gets this year by carrying
+        // forward from an earlier year, and saving while blank makes no change at all --
+        // only typing a number here sets this year specifically.
+        const hasOwnYearValue = !!(emp.vacationDaysByYear && Object.prototype.hasOwnProperty.call(emp.vacationDaysByYear, currentYear));
         const vacDaysInput = document.createElement('input');
         vacDaysInput.type = 'number'; vacDaysInput.min = '0'; vacDaysInput.step = '0.5';
-        vacDaysInput.value = empVacationDaysPerYear(emp);
-        vacDaysInput.title = 'Vacation days/year';
+        vacDaysInput.value = hasOwnYearValue ? emp.vacationDaysByYear[currentYear] : '';
+        vacDaysInput.placeholder = String(empVacationDaysForYear(emp, currentYear));
+        vacDaysInput.title = 'Vacation days for ' + currentYear + ' — leave blank to keep carrying forward from an earlier year';
         vacDaysInput.disabled = !canVac;
         vacDaysInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;width:60px;' + (canVac ? '' : 'opacity:.5;');
+        const vacDaysLabel = document.createElement('span');
+        vacDaysLabel.textContent = currentYear + ':';
+        vacDaysLabel.style.cssText = 'font-size:11.5px;color:var(--grey-strong);align-self:center;';
         const saveBtn = document.createElement('button');
         saveBtn.textContent = 'Save'; saveBtn.style.color = 'var(--green-strong)';
         saveBtn.onclick = ()=>{
@@ -1588,7 +1598,9 @@
           }
           if(canVac){
             const vacDaysRaw = vacDaysInput.value.trim();
-            emp.vacationDaysPerYear = vacDaysRaw === '' ? DEFAULT_VACATION_DAYS_PER_YEAR : (parseFloat(vacDaysRaw) || 0);
+            emp.vacationDaysByYear = emp.vacationDaysByYear || {};
+            if(vacDaysRaw === ''){ delete emp.vacationDaysByYear[currentYear]; }
+            else { emp.vacationDaysByYear[currentYear] = parseFloat(vacDaysRaw) || 0; }
           }
           editingEmpId = null;
           saveEmployees();
@@ -1599,11 +1611,11 @@
         cancelBtn.textContent = 'Cancel';
         cancelBtn.onclick = ()=>{ editingEmpId = null; renderAll(); };
 
-        row.appendChild(nameInput); row.appendChild(emailInput); row.appendChild(startInput); row.appendChild(vacDaysInput); row.appendChild(saveBtn); row.appendChild(cancelBtn);
+        row.appendChild(nameInput); row.appendChild(emailInput); row.appendChild(startInput); row.appendChild(vacDaysLabel); row.appendChild(vacDaysInput); row.appendChild(saveBtn); row.appendChild(cancelBtn);
       } else {
         const name = document.createElement('span'); name.className='name'; name.textContent = emp.name;
         const email = document.createElement('span'); email.className='email';
-        email.textContent = (emp.email || '(no email)') + (emp.hiredDate ? (' — starts ' + emp.hiredDate) : '') + ' — ' + empVacationDaysPerYear(emp) + ' vac days/yr';
+        email.textContent = (emp.email || '(no email)') + (emp.hiredDate ? (' — starts ' + emp.hiredDate) : '') + ' — ' + empVacationDaysForYear(emp, currentYear) + ' vac days/yr (' + currentYear + ')';
         const edit = document.createElement('button'); edit.textContent='Edit'; edit.style.color = 'var(--blue-past-strong)';
         edit.onclick = ()=>{ editingEmpId = emp.id; renderAll(); };
         const del = document.createElement('button'); del.textContent='Remove';
@@ -1785,9 +1797,9 @@
     const email = document.getElementById('newEmpEmail').value.trim();
     const startDate = document.getElementById('newEmpStart').value; // yyyy-mm-dd or ''
     const vacDaysRaw = document.getElementById('newEmpVacDays').value.trim();
-    const vacDays = (!can('editVacationDays') || vacDaysRaw === '') ? DEFAULT_VACATION_DAYS_PER_YEAR : (parseFloat(vacDaysRaw) || 0);
+    const vacationDaysByYear = (can('editVacationDays') && vacDaysRaw !== '') ? {[currentYear]: parseFloat(vacDaysRaw) || 0} : {};
     if(!name) return;
-    state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null, vacationDaysPerYear: vacDays});
+    state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null, vacationDaysByYear});
     document.getElementById('newEmpName').value='';
     document.getElementById('newEmpEmail').value='';
     document.getElementById('newEmpStart').value='';
@@ -1897,8 +1909,10 @@
 
     async function draw(){
       const overrides = await loadLedgerOverrides();
-      const rows = await computeYearlyLedger(empId, year, overrides);
-      const annualDays = empVacationDaysPerYear(emp);
+      const corrections = await loadLedgerCorrections();
+      const rows = await computeYearlyLedger(empId, year, overrides, corrections);
+      const annualDays = empVacationDaysForYear(emp, year);
+      const canEditBalances = can('editVacationDays');
       // "Remaining" only means something when looking at the real current year -- a
       // past or future year's table doesn't have a "today" row to report a balance as of.
       const realToday = new Date();
@@ -1907,12 +1921,12 @@
 
       results.innerHTML =
         '<h4 style="margin:10px 0 6px;">' + emp.name + ' — ' + year + '</h4>' +
-        '<p class="note" style="margin-bottom:8px;">On/Weekend-Stat/Sick/Unpaid are counted through today; months not yet reached show zero there. Vac includes vacation days already booked for later months too, since those already reduce the balance below. Vacation balance accrues ' + (annualDays/12).toFixed(2) + ' days/month; click an ending figure to correct it.</p>' +
+        '<p class="note" style="margin-bottom:8px;">On/Weekend-Stat/Sick/Unpaid are counted through today; months not yet reached show zero there. Vac includes vacation days already booked for later months too, since those already reduce the balance below. Vacation balance accrues ' + (annualDays/12).toFixed(2) + ' days/month' + (canEditBalances ? '; use the Correction column to adjust a month, or the ending-balance column to set an exact figure' : '') + '.</p>' +
         '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:baseline;margin-bottom:10px;font-size:13.5px;">' +
           '<div><strong>Vacation days allowed per year:</strong> ' + annualDays + '</div>' +
           (showRemaining ? '<div><strong>Remaining vacation (as of today):</strong> ' + (remaining===null ? '— (set a starting balance below first)' : remaining.toFixed(2) + ' days') + '</div>' : '') +
         '</div>' +
-        renderLedgerTableHtml(rows, {editable:true});
+        renderLedgerTableHtml(rows, {editable:canEditBalances});
       wireLedgerOverrideInputs(results, empId, year, draw);
     }
     await draw();
@@ -2491,14 +2505,27 @@
   // Used by both the password-locked HR report (Mario only, includes the dollar value)
   // and the Employee summary (any employee, no dollar value). Same table shape, same
   // accrual/override math -- just rendered with or without the $ line.
-  const DEFAULT_VACATION_DAYS_PER_YEAR = 30; // used whenever an employee has no figure of their own set
+  const DEFAULT_VACATION_DAYS_PER_YEAR = 30; // used whenever an employee has no figure of their own set, for any year
 
-  // Each employee can be given their own annual vacation-day entitlement (Employee
-  // panel); employees from before that existed, or with nothing entered, fall back to
-  // the default above rather than being left unset.
-  function empVacationDaysPerYear(emp){
-    const v = emp && emp.vacationDaysPerYear;
-    return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : DEFAULT_VACATION_DAYS_PER_YEAR;
+  // Not every employee's annual entitlement is the same, and it can change from one
+  // year to the next (a raise, a policy change, etc.) -- so this is tracked per employee
+  // PER YEAR (emp.vacationDaysByYear: {year: days}), set from the Employee panel while
+  // viewing that year. A year with nothing entered simply carries forward the most
+  // recent earlier year that WAS set, so "no change" really does mean no change. The
+  // old single flat emp.vacationDaysPerYear field (from before this existed) is kept as
+  // the fallback underneath everything, so nothing already saved is lost; the global
+  // default underneath that covers an employee with no figure set at all.
+  function empVacationDaysForYear(emp, year){
+    if(emp && emp.vacationDaysByYear){
+      const setYears = Object.keys(emp.vacationDaysByYear).map(Number).filter(y=>y<=year);
+      if(setYears.length){
+        const latest = Math.max(...setYears);
+        const v = emp.vacationDaysByYear[latest];
+        if(typeof v === 'number' && isFinite(v) && v >= 0) return v;
+      }
+    }
+    const legacy = emp && emp.vacationDaysPerYear;
+    return (typeof legacy === 'number' && isFinite(legacy) && legacy >= 0) ? legacy : DEFAULT_VACATION_DAYS_PER_YEAR;
   }
 
   // Day-type counts for one employee for one month (On/Weekend-Stat/Vac/Sick/Unpaid).
@@ -2571,16 +2598,44 @@
     await storageSet('hrVacationOverrides', JSON.stringify(overrides), true);
   }
 
+  // A SEPARATE set of +/- adjustments (same key shape as the overrides above, just a
+  // different storage slot) for the common case of "this month's balance is off by a
+  // couple of days, fix it" -- type the difference (2, -1.5, ...) rather than having to
+  // work out and re-enter the whole resulting total. Kept apart from hrVacationOverrides
+  // on purpose: that one holds the rare, one-time ANCHOR figure that tells the ledger
+  // where to start counting from at all (e.g. "36.70 days as of end of August 2026") --
+  // reinterpreting already-saved anchor values as deltas instead of absolutes would
+  // silently and badly corrupt real balances, so overrides keep their original meaning
+  // and corrections are purely additive on top of whatever they (or the automatic
+  // accrual) produce.
+  function ledgerCorrectionKey(empId, year, month){
+    return ledgerOverrideKey(empId, year, month);
+  }
+  async function loadLedgerCorrections(){
+    let corrections = {};
+    try{
+      const raw = await storageGet('hrVacationCorrections', true);
+      if(raw) corrections = JSON.parse(raw);
+    }catch(e){}
+    return corrections;
+  }
+  async function saveLedgerCorrections(corrections){
+    await storageSet('hrVacationCorrections', JSON.stringify(corrections), true);
+  }
+
   // Builds the 12-month ledger for one employee/year: day-type totals plus a running
   // vacation balance (beginning/end of each month) that accrues this employee's own
-  // annual entitlement (set in the Employee panel, or the default) ÷ 12 automatically,
-  // and is reduced by any VAC/half-VAC day recorded that month. Any month's ending
-  // balance can carry a manual correction; once set, every later month continues the
-  // running calculation from that corrected figure instead of the computed one.
-  async function computeYearlyLedger(empId, year, overrides){
+  // annual entitlement for THIS year (set in the Employee panel, or carried forward, or
+  // the default) ÷ 12 automatically, and is reduced by any VAC/half-VAC day recorded
+  // that month. A month can also carry: an anchor override (replaces the computed
+  // figure outright -- for establishing a starting balance) and/or a +/- correction
+  // (adjusts whatever figure -- computed or anchored -- up or down). Either way, every
+  // later month continues the running calculation from that month's actual result.
+  async function computeYearlyLedger(empId, year, overrides, corrections){
     await ensureYearLoaded(year);
     const emp = state.employees.find(e=>e.id===empId);
-    const accrualPerMonth = empVacationDaysPerYear(emp) / 12;
+    const accrualPerMonth = empVacationDaysForYear(emp, year) / 12;
+    corrections = corrections || {};
     let running = null; // unknown until an override establishes a starting point
     const rows = [];
     for(let m=0; m<12; m++){
@@ -2588,12 +2643,14 @@
       const key = ledgerOverrideKey(empId, year, m);
       const hasOverride = Object.prototype.hasOwnProperty.call(overrides, key);
       const vacThisMonth = countVacationDaysInMonth(empId, year, m);
+      const hasCorrection = Object.prototype.hasOwnProperty.call(corrections, key);
+      const correction = hasCorrection ? (parseFloat(corrections[key]) || 0) : 0;
       let end;
-      if(hasOverride){ end = overrides[key]; }
-      else if(running !== null){ end = running + accrualPerMonth - vacThisMonth; }
+      if(hasOverride){ end = overrides[key] + correction; }
+      else if(running !== null){ end = running + accrualPerMonth - vacThisMonth + correction; }
       else { end = null; }
       running = end;
-      rows.push({ month:m, begin, end, overridden:hasOverride, overrideKey:key, dayStats: computeDayStatsForMonth(empId, year, m) });
+      rows.push({ month:m, begin, end, overridden:hasOverride, overrideKey:key, correction:hasCorrection?correction:null, dayStats: computeDayStatsForMonth(empId, year, m) });
     }
     return rows;
   }
@@ -2611,10 +2668,10 @@
   // the rate is edited, without rebuilding the table (which would drop input focus).
   function renderLedgerTableHtml(rows, opts){
     opts = opts || {};
-    let totalWork=0, totalWeekend=0, totalVac=0, totalSick=0, totalUnpaid=0;
+    let totalWork=0, totalWeekend=0, totalVac=0, totalSick=0, totalUnpaid=0, totalCorrection=0;
     const bodyRows = rows.map(r=>{
       totalWork += r.dayStats.work; totalWeekend += r.dayStats.weekend; totalVac += r.dayStats.vac;
-      totalSick += r.dayStats.sick; totalUnpaid += r.dayStats.unpaid;
+      totalSick += r.dayStats.sick; totalUnpaid += r.dayStats.unpaid; totalCorrection += (r.correction || 0);
       const beginTxt = r.begin===null ? '—' : r.begin.toFixed(2);
       let endCell;
       if(opts.editable){
@@ -2623,18 +2680,26 @@
       } else {
         endCell = (r.end===null ? '—' : r.end.toFixed(2));
       }
+      let correctionCell;
+      if(opts.editable){
+        const cval = (r.correction===null || r.correction===0) ? '' : r.correction;
+        correctionCell = '<input type="number" step="0.1" class="ledger-correction-input" data-key="' + r.overrideKey + '" value="' + cval + '" placeholder="—" style="width:60px;padding:3px 5px;border:1px solid var(--line);border-radius:5px;font-size:12px;text-align:right;' + (r.correction ? 'font-weight:800;color:var(--blue-past-strong);' : '') + '">';
+      } else {
+        correctionCell = (r.correction ? (r.correction>0?'+':'') + r.correction.toFixed(2) : '—');
+      }
       let dollarCell = '';
       if(opts.showDollar){
         const dollarTxt = r.end===null ? '—' : formatDollar(r.end * opts.dailyRate);
         dollarCell = '<td class="ledger-dollar-cell" data-end="' + (r.end===null ? '' : r.end) + '">' + dollarTxt + '</td>';
       }
-      return '<tr><td>' + MONTHS[r.month] + '</td><td>' + r.dayStats.work + '</td><td>' + r.dayStats.weekend + '</td><td>' + r.dayStats.vac + '</td><td>' + r.dayStats.sick + '</td><td>' + r.dayStats.unpaid + '</td><td>' + beginTxt + '</td><td>' + endCell + '</td>' + dollarCell + '</tr>';
+      return '<tr><td>' + MONTHS[r.month] + '</td><td>' + r.dayStats.work + '</td><td>' + r.dayStats.weekend + '</td><td>' + r.dayStats.vac + '</td><td>' + r.dayStats.sick + '</td><td>' + r.dayStats.unpaid + '</td><td>' + beginTxt + '</td><td>' + endCell + '</td><td>' + correctionCell + '</td>' + dollarCell + '</tr>';
     }).join('');
     const dollarHeader = opts.showDollar ? '<th>Vac. value ($)</th>' : '';
     const dollarTotalCell = opts.showDollar ? '<td></td>' : '';
-    return '<table class="hr-table"><thead><tr><th>Month</th><th>On</th><th>Weekend/Stat</th><th>Vac</th><th>Sick</th><th>Unpaid</th><th>Vac. balance (start)</th><th>Vac. balance (end)' + (opts.editable ? ' — click to correct' : '') + '</th>' + dollarHeader + '</tr></thead><tbody>' +
+    const totalCorrectionTxt = totalCorrection ? ((totalCorrection>0?'+':'') + totalCorrection.toFixed(2)) : '';
+    return '<table class="hr-table"><thead><tr><th>Month</th><th>On</th><th>Weekend/Stat</th><th>Vac</th><th>Sick</th><th>Unpaid</th><th>Vac. balance (start)</th><th>Vac. balance (end)' + (opts.editable ? ' — click to set an exact figure' : '') + '</th><th>Correction (+/-)' + (opts.editable ? ' — click to adjust' : '') + '</th>' + dollarHeader + '</tr></thead><tbody>' +
       bodyRows +
-      '<tr class="lifetime"><td>Total</td><td>' + totalWork + '</td><td>' + totalWeekend + '</td><td>' + totalVac + '</td><td>' + totalSick + '</td><td>' + totalUnpaid + '</td><td></td><td></td>' + dollarTotalCell + '</tr>' +
+      '<tr class="lifetime"><td>Total</td><td>' + totalWork + '</td><td>' + totalWeekend + '</td><td>' + totalVac + '</td><td>' + totalSick + '</td><td>' + totalUnpaid + '</td><td></td><td></td><td>' + totalCorrectionTxt + '</td>' + dollarTotalCell + '</tr>' +
       '</tbody></table>';
   }
   // Recomputes every "Vac. value ($)" cell in a just-rendered HR report table for a new
@@ -2658,6 +2723,16 @@
         if(input.value === ''){ delete overrides[key]; }
         else { overrides[key] = parseFloat(input.value) || 0; }
         await saveLedgerOverrides(overrides);
+        await onChanged();
+      };
+    });
+    container.querySelectorAll('.ledger-correction-input').forEach(input=>{
+      input.onchange = async ()=>{
+        const corrections = await loadLedgerCorrections();
+        const key = input.dataset.key;
+        if(input.value === '' || parseFloat(input.value) === 0){ delete corrections[key]; }
+        else { corrections[key] = parseFloat(input.value) || 0; }
+        await saveLedgerCorrections(corrections);
         await onChanged();
       };
     });
@@ -2707,18 +2782,20 @@
 
     async function draw(){
       const overridesNow = await loadLedgerOverrides();
-      const rows = await computeYearlyLedger(emp.id, year, overridesNow);
+      const correctionsNow = await loadLedgerCorrections();
+      const rows = await computeYearlyLedger(emp.id, year, overridesNow, correctionsNow);
       const rateNow = parseFloat(storedRate) || 0;
+      const annualDays = empVacationDaysForYear(emp, year);
 
       body.innerHTML =
         '<p class="note">Counts below come straight from ' + emp.name + '\'s calendar entries for ' + year + '. On/Weekend-Stat/Sick/Unpaid are counted through today (months not yet reached show zero there); Vac includes vacation days already booked for later months too, since those already reduce the balance below. Weekend/Stat includes weekends, Alberta general holidays, and explicit "Weekend / Stat" overrides.</p>' +
-        '<div style="font-size:13.5px;margin-bottom:10px;"><strong>Vacation days allowed per year:</strong> ' + empVacationDaysPerYear(emp) + '</div>' +
+        '<div style="font-size:13.5px;margin-bottom:10px;"><strong>Vacation days allowed per year:</strong> ' + annualDays + '</div>' +
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
           '<label style="font-size:12px;color:var(--grey-strong);">Daily rate ($)</label>' +
           '<input type="number" id="hrRateInput" step="0.001" value="' + storedRate + '" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
         '</div>' +
         renderLedgerTableHtml(rows, {editable:true, showDollar:true, dailyRate:rateNow}) +
-        '<div class="note" style="margin:10px 0 6px;">Vacation balance accrues ' + (empVacationDaysPerYear(emp)/12).toFixed(2) + ' days each month (the per-year figure above ÷ 12, set in the Employee panel), reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Click into any month\'s ending figure to correct it directly; later months then calculate forward from your correction. Clear a box to return to the automatic calculation. "Vac. value ($)" is that month\'s ending balance × the daily rate above.</div>';
+        '<div class="note" style="margin:10px 0 6px;">Vacation balance accrues ' + (annualDays/12).toFixed(2) + ' days each month (the per-year figure above ÷ 12, set in the Employee panel), reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Use the Correction column to nudge a month up or down by a known amount; use the ending-balance column when you need to set an exact figure instead (for example, the very first month this ledger starts tracking from). Clear a box to return to the automatic calculation. "Vac. value ($)" is that month\'s ending balance × the daily rate above.</div>';
 
       document.getElementById('hrRateInput').oninput = (e)=>{
         storedRate = e.target.value;
