@@ -706,7 +706,14 @@
       }
       okBtn.onclick = async ()=>{
         const hash = await sha256(input.value);
-        if(currentUser && hash === currentUser.passwordHash){ cleanup(); resolve(true); }
+        if(currentUser && hash === currentUser.passwordHash){
+          // Same reason as the other password fields: don't leave the just-typed password
+          // sitting in this (now just hidden, not removed) field, or Chrome will later
+          // re-offer "Update password?" the next time anything on the page saves.
+          input.value = '';
+          cleanup();
+          resolve(true);
+        }
         else { err.textContent = 'Incorrect password.'; input.value=''; }
       };
       cancelBtn.onclick = ()=>{ cleanup(); resolve(false); };
@@ -1908,19 +1915,33 @@
 
   document.getElementById('summaryBtn').onclick = async ()=>{
     summarySelect.innerHTML = '';
-    state.employees.forEach(emp=>{
-      const opt = document.createElement('option');
-      opt.value = emp.id;
-      opt.textContent = emp.name + (emp.active===false ? ' (removed)' : '');
-      summarySelect.appendChild(opt);
-    });
+    state.employees
+      // "Mario" (exact match only -- NOT "Mario F.", a different employee) already has his
+      // own figures in the separately password-locked HR report; leaving him out of this
+      // dropdown too keeps that data from also being reachable by anyone who can log in at
+      // all, which is the whole reason the HR report has its own extra password.
+      .filter(emp => emp.name.trim() !== HR_TARGET_NAME)
+      .forEach(emp=>{
+        const opt = document.createElement('option');
+        opt.value = emp.id;
+        opt.textContent = emp.name + (emp.active===false ? ' (removed)' : '');
+        summarySelect.appendChild(opt);
+      });
     summaryBackdrop.classList.add('show');
     await renderSummaryResults();
   };
   document.getElementById('summaryCloseBtn').onclick = ()=>{ summaryBackdrop.classList.remove('show'); };
   summarySelect.onchange = renderSummaryResults;
 
+  // Guards against a slow-to-finish save (e.g. the rate or vacation-days field, which
+  // await a network write before redrawing) landing AFTER the panel has since moved on --
+  // to a different employee, or just a newer edit -- and overwriting that newer view with
+  // stale data. Each call captures the generation counter at its start and checks it again
+  // immediately before touching the DOM; a mismatch means a newer render has since begun,
+  // so this one silently drops its result instead of clobbering it.
+  let summaryRenderGen = 0;
   async function renderSummaryResults(){
+    const myGen = ++summaryRenderGen;
     const empId = summarySelect.value;
     const emp = state.employees.find(e=>e.id===empId);
     const results = document.getElementById('summaryResults');
@@ -1953,6 +1974,8 @@
       const realToday = new Date();
       const showRemaining = (year === realToday.getFullYear());
       const remaining = showRemaining ? rows[realToday.getMonth()].end : null;
+
+      if(myGen !== summaryRenderGen) return; // a newer render started while the above awaited -- don't clobber it
 
       results.innerHTML =
         '<h4 style="margin:10px 0 6px;">' + emp.name + ' — ' + year + '</h4>' +
@@ -2866,7 +2889,11 @@
     return overrides;
   }
 
+  // Same stale-render guard as the Employee summary panel's draw() -- a slow-to-finish save
+  // shouldn't be able to land after a newer one and clobber it.
+  let hrReportRenderGen = 0;
   async function renderHrReport(){
+    const myGen = ++hrReportRenderGen;
     const body = document.getElementById('hrReportBody');
     const emp = state.employees.find(e => e.name.trim() === HR_TARGET_NAME);
     if(!emp){
@@ -2889,6 +2916,7 @@
       const rateNow = empDailyRate(emp);
       const annualDays = empVacationDaysForYear(emp, year);
       const hasOwnYearValue = !!(emp.vacationDaysByYear && Object.prototype.hasOwnProperty.call(emp.vacationDaysByYear, year));
+      if(myGen !== hrReportRenderGen) return; // a newer render started while the above awaited -- don't clobber it
 
       body.innerHTML =
         '<p class="note">Counts below come straight from ' + emp.name + '\'s calendar entries for ' + year + '. On/Weekend-Stat/Sick/Unpaid are counted through today (months not yet reached show zero there); Vac includes vacation days already booked for later months too, since those already reduce the balance below. Weekend/Stat includes weekends, Alberta general holidays, and explicit "Weekend / Stat" overrides.</p>' +
@@ -2957,6 +2985,10 @@
         gateSection.style.display = 'none';
         reportSection.style.display = 'block';
         title.textContent = 'HR report — ' + HR_TARGET_NAME;
+        // Same reason as the main login: leaving the just-typed password sitting in these
+        // (now just hidden, not removed) fields is what makes Chrome re-offer "Update
+        // password?" later, the next time anything on the page saves in the background.
+        p1.value = ''; p2.value = '';
         await renderHrReport();
       } else {
         const hash = await sha256(p1.value);
@@ -2964,6 +2996,7 @@
           gateSection.style.display = 'none';
           reportSection.style.display = 'block';
           title.textContent = 'HR report — ' + HR_TARGET_NAME;
+          p1.value = ''; p2.value = '';
           await renderHrReport();
         } else {
           err.textContent = 'Incorrect password.'; p1.value='';
