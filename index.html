@@ -532,6 +532,74 @@
     return STATUS_LABEL[rec.status] || rec.status;
   }
 
+  // ---------- Sick-day policy ----------
+  // Sick days aren't counted against vacation balance, but they're capped on their own:
+  // up to 10 paid sick days per calendar year per employee, and never more than 3 of
+  // those within any rolling 30-day window. Past either limit the day should be booked
+  // as Vacation or Unpaid instead -- this is advisory (the manager can still override),
+  // checked whenever a day is about to be marked Sick or Half day sick.
+  const SICK_ANNUAL_CAP = 10;
+  const SICK_ROLLING_CAP = 3;
+  const SICK_ROLLING_WINDOW = 30;
+
+  function sickPortion(rec){
+    if(!rec) return 0;
+    if(rec.status === 'SICK') return 1;
+    if(rec.status === 'HALF' && rec.half === 'SICK') return 0.5;
+    return 0;
+  }
+  function formatSickCount(n){
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  }
+  // Reads the stored sick-day portion for one employee on one date, loading that year's
+  // schedule into memory first if needed -- a 30-day lookback from early January can
+  // reach into December of the previous year, which may not otherwise be loaded yet.
+  async function sickPortionOnDate(y, m, d, empId){
+    await ensureYearLoaded(y);
+    const rec = (state.schedules[y] || {})[cellKey(m, d, empId)];
+    return sickPortion(rec);
+  }
+  // Projects what one employee's sick-day usage would be if `newPortion` (0.5 or 1) were
+  // applied to every day from dayLo..dayHi of (year, month), replacing whatever is
+  // already on those specific days, then checks that projection against both policy
+  // limits. Returns null when within policy, otherwise a one-line description.
+  async function checkSickPolicy(empId, empName, year, month, dayLo, dayHi, newPortion){
+    const inRange = (y, m, d) => y===year && m===month && d>=dayLo && d<=dayHi;
+
+    await ensureYearLoaded(year);
+    let annual = 0;
+    const bucket = state.schedules[year] || {};
+    Object.keys(bucket).forEach(k=>{
+      const mtch = k.match(/^(\d+)-(\d+)-(.+)$/);
+      if(!mtch) return;
+      const mo = parseInt(mtch[1],10), da = parseInt(mtch[2],10), id = mtch[3];
+      if(id !== empId || inRange(year, mo, da)) return; // in-range days are counted via newPortion below
+      annual += sickPortion(bucket[k]);
+    });
+    annual += newPortion * (dayHi - dayLo + 1);
+
+    let worstWindow = 0, worstEndDate = null;
+    for(let d=dayLo; d<=dayHi; d++){
+      let windowTotal = 0;
+      for(let off=0; off<SICK_ROLLING_WINDOW; off++){
+        const dt = new Date(year, month, d - off);
+        const y2 = dt.getFullYear(), m2 = dt.getMonth(), d2 = dt.getDate();
+        windowTotal += inRange(y2, m2, d2) ? newPortion : await sickPortionOnDate(y2, m2, d2, empId);
+      }
+      if(windowTotal > worstWindow){ worstWindow = windowTotal; worstEndDate = new Date(year, month, d); }
+    }
+
+    const problems = [];
+    if(worstWindow > SICK_ROLLING_CAP){
+      problems.push(formatSickCount(worstWindow) + ' sick days in the 30 days ending ' + MONTHS[worstEndDate.getMonth()] + ' ' + worstEndDate.getDate() + ' (limit ' + SICK_ROLLING_CAP + ')');
+    }
+    if(annual > SICK_ANNUAL_CAP){
+      problems.push(formatSickCount(annual) + ' sick days in ' + year + ' (limit ' + SICK_ANNUAL_CAP + ')');
+    }
+    if(!problems.length) return null;
+    return empName + ' — ' + problems.join('; ') + '.';
+  }
+
   // A lightweight log of edits (schedule changes and employee list changes), used to build
   // the "what changed" summary offered in the Print & Email body. Capped so it can't grow
   // forever; the Print & Email flow consumes recent entries, not the full history.
@@ -1358,6 +1426,26 @@
     const idxLo = Math.min(idxA, idxB), idxHi = Math.max(idxA, idxB);
     const empIds = list.slice(idxLo, idxHi+1);
 
+    let newSickPortion = 0;
+    if(cond.status === 'SICK') newSickPortion = 1;
+    else if(cond.status === 'HALF' && cond.half === 'SICK') newSickPortion = 0.5;
+    if(newSickPortion > 0){
+      const violations = [];
+      for(const empId of empIds){
+        const emp = state.employees.find(e=>e.id===empId);
+        const msg = await checkSickPolicy(empId, emp ? emp.name : empId, year, month, dayLo, dayHi, newSickPortion);
+        if(msg) violations.push(msg);
+      }
+      if(violations.length){
+        const proceed = confirm(
+          state.company + "'s paid sick-day policy allows up to 3 sick days in any 30-day period and 10 per year " +
+          "-- past that, the day should be Vacation or Unpaid instead:\n\n" + violations.join('\n') +
+          '\n\nMark as Sick anyway? Cancel to leave it unchanged and pick Vacation or Unpaid instead.'
+        );
+        if(!proceed) return;
+      }
+    }
+
     let anyPast = false;
     for(let d=dayLo; d<=dayHi; d++){ if(isPastDate(year, month, d)){ anyPast = true; break; } }
     if(anyPast){
@@ -1409,7 +1497,8 @@
     }
     btn.appendChild(sw);
     btn.appendChild(document.createTextNode(cond.label));
-    btn.title = 'Click to apply to your selected range of days';
+    btn.title = 'Click to apply to your selected range of days' +
+      ((cond.key==='SICK' || cond.key==='HALF_SICK') ? ' — paid sick days are capped at 3 per 30 days and 10 per year; past that, use Vacation or Unpaid.' : '');
     btn.onclick = ()=> applyConditionToRange(cond.key);
     return btn;
   }
