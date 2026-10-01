@@ -352,6 +352,7 @@
     </div>
 
     <div class="toolbar">
+      <button id="refreshBtn" title="Reload the latest schedule, employee, and settings changes made by anyone else — stays logged in">⟳ Refresh</button>
       <button id="clearSelectionBtn">Clear selection</button>
       <span style="flex:1"></span>
       <label style="font-size:12.5px;color:var(--grey-strong);display:flex;align-items:center;gap:6px;">
@@ -364,7 +365,7 @@
     </div>
 
     <div class="panel" id="empPanel" style="display:none;">
-      <div class="emp-manager">
+      <div class="emp-manager" id="addEmpForm">
         <div class="field"><label>Name</label><input id="newEmpName" placeholder="e.g. Randy"></div>
         <div class="field"><label>Email</label><input id="newEmpEmail" placeholder="name@company.com"></div>
         <div class="field"><label>Start date (optional)</label><input id="newEmpStart" type="date"></div>
@@ -491,6 +492,7 @@
       <div style="display:flex;flex-wrap:wrap;gap:12px;margin:10px 0;font-size:12.5px;">
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserEditCalendar" checked style="width:auto;"> Edit calendar</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserManageEmployees" style="width:auto;"> Manage employees</label>
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserEditVacationDays" style="width:auto;"> Change vacation days/year</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserSendEmail" checked style="width:auto;"> Send Print &amp; email</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserBackupRestore" style="width:auto;"> Backup / restore</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserManageSettings" style="width:auto;"> Change settings</label>
@@ -724,9 +726,9 @@
   // ---------- user accounts & permissions ----------
   // Replaces the old single shared "app_password". Each person gets their own username +
   // password and a checklist of what they're allowed to do, set by an administrator.
-  const DEFAULT_ADMIN_PERMISSIONS = { editCalendar:true, manageEmployees:true, sendEmail:true, backupRestore:true, manageSettings:true, isAdmin:true };
-  const PERMISSION_FIELDS = ['editCalendar','manageEmployees','sendEmail','backupRestore','manageSettings','isAdmin'];
-  const PERMISSION_LABELS = { editCalendar:'Edit calendar', manageEmployees:'Manage employees', sendEmail:'Send Print & email', backupRestore:'Backup / restore', manageSettings:'Change settings', isAdmin:'Administrator' };
+  const DEFAULT_ADMIN_PERMISSIONS = { editCalendar:true, manageEmployees:true, editVacationDays:true, sendEmail:true, backupRestore:true, manageSettings:true, isAdmin:true };
+  const PERMISSION_FIELDS = ['editCalendar','manageEmployees','editVacationDays','sendEmail','backupRestore','manageSettings','isAdmin'];
+  const PERMISSION_LABELS = { editCalendar:'Edit calendar', manageEmployees:'Manage employees', editVacationDays:'Change vacation days/year', sendEmail:'Send Print & email', backupRestore:'Backup / restore', manageSettings:'Change settings', isAdmin:'Administrator' };
 
   let currentUser = null;     // {id, name, username, email, passwordHash, permissions}
   let loginTimestamp = null;  // ISO string set the moment the current session unlocked
@@ -1541,46 +1543,56 @@
 
       const orderBtns = document.createElement('div'); orderBtns.className='order-btns';
       const up = document.createElement('button'); up.textContent='▲'; up.title='Move up';
-      up.disabled = idx===0;
+      up.disabled = idx===0 || !can('manageEmployees');
       up.onclick = ()=> moveEmployee(emp.id, -1);
       const down = document.createElement('button'); down.textContent='▼'; down.title='Move down';
-      down.disabled = idx===active.length-1;
+      down.disabled = idx===active.length-1 || !can('manageEmployees');
       down.onclick = ()=> moveEmployee(emp.id, 1);
       orderBtns.appendChild(up); orderBtns.appendChild(down);
       row.appendChild(orderBtns);
 
       if(editingEmpId === emp.id){
+        const canManage = can('manageEmployees');
+        const canVac = can('editVacationDays');
         const nameInput = document.createElement('input');
         nameInput.value = emp.name;
-        nameInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;width:110px;';
+        nameInput.disabled = !canManage;
+        nameInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;width:110px;' + (canManage ? '' : 'opacity:.5;');
         const emailInput = document.createElement('input');
         emailInput.value = emp.email || '';
         emailInput.placeholder = 'name@company.com';
-        emailInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;flex:1;';
+        emailInput.disabled = !canManage;
+        emailInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;flex:1;' + (canManage ? '' : 'opacity:.5;');
         const startInput = document.createElement('input');
         startInput.type = 'date';
         startInput.value = emp.hiredDate || '';
         startInput.title = 'Start date (optional)';
-        startInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;';
+        startInput.disabled = !canManage;
+        startInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;' + (canManage ? '' : 'opacity:.5;');
         const vacDaysInput = document.createElement('input');
         vacDaysInput.type = 'number'; vacDaysInput.min = '0'; vacDaysInput.step = '0.5';
         vacDaysInput.value = empVacationDaysPerYear(emp);
         vacDaysInput.title = 'Vacation days/year';
-        vacDaysInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;width:60px;';
+        vacDaysInput.disabled = !canVac;
+        vacDaysInput.style.cssText = 'padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;width:60px;' + (canVac ? '' : 'opacity:.5;');
         const saveBtn = document.createElement('button');
         saveBtn.textContent = 'Save'; saveBtn.style.color = 'var(--green-strong)';
         saveBtn.onclick = ()=>{
-          if(!can('manageEmployees')) return;
-          const newName = nameInput.value.trim();
-          if(!newName){ alert('Name can\'t be empty.'); return; }
-          emp.name = newName;
-          emp.email = emailInput.value.trim();
-          emp.hiredDate = startInput.value || null;
-          const vacDaysRaw = vacDaysInput.value.trim();
-          emp.vacationDaysPerYear = vacDaysRaw === '' ? DEFAULT_VACATION_DAYS_PER_YEAR : (parseFloat(vacDaysRaw) || 0);
+          if(!canManage && !canVac) return;
+          if(canManage){
+            const newName = nameInput.value.trim();
+            if(!newName){ alert('Name can\'t be empty.'); return; }
+            emp.name = newName;
+            emp.email = emailInput.value.trim();
+            emp.hiredDate = startInput.value || null;
+          }
+          if(canVac){
+            const vacDaysRaw = vacDaysInput.value.trim();
+            emp.vacationDaysPerYear = vacDaysRaw === '' ? DEFAULT_VACATION_DAYS_PER_YEAR : (parseFloat(vacDaysRaw) || 0);
+          }
           editingEmpId = null;
           saveEmployees();
-          logEmployeeChange('edited', newName);
+          logEmployeeChange('edited', emp.name);
           renderAll();
         };
         const cancelBtn = document.createElement('button');
@@ -1595,6 +1607,8 @@
         const edit = document.createElement('button'); edit.textContent='Edit'; edit.style.color = 'var(--blue-past-strong)';
         edit.onclick = ()=>{ editingEmpId = emp.id; renderAll(); };
         const del = document.createElement('button'); del.textContent='Remove';
+        del.disabled = !can('manageEmployees');
+        if(del.disabled) del.style.opacity = '.5';
         del.onclick = ()=>{
           if(!can('manageEmployees')) return;
           if(!confirm('Remove ' + emp.name + '? They\'ll stay visible on past months\' schedules but will no longer appear on the current or future schedule.')) return;
@@ -1624,6 +1638,8 @@
         const email = document.createElement('span'); email.className='email';
         email.textContent = (emp.email || '(no email)') + ' — removed ' + emp.removedDate;
         const restore = document.createElement('button'); restore.textContent='Restore'; restore.style.color='var(--green-strong)';
+        restore.disabled = !can('manageEmployees');
+        if(restore.disabled) restore.style.opacity = '.5';
         restore.onclick = ()=>{
           if(!can('manageEmployees')) return;
           emp.active = true; emp.removedDate = null; saveEmployees();
@@ -1696,6 +1712,57 @@
     }
   }
 
+  // Pulls the latest schedule, employee, and settings data straight from Supabase and
+  // redraws the calendar — for picking up changes someone else just made without doing
+  // a full page reload, which would otherwise sign the current user back out (currentUser
+  // only ever lives in memory; see lockApp()). Drop everything cached in memory for what's
+  // on screen so the next load re-fetches it instead of reusing the in-memory copy.
+  async function refreshAppData(){
+    const btn = document.getElementById('refreshBtn');
+    const originalText = btn ? btn.textContent : '';
+    if(btn){ btn.disabled = true; btn.textContent = 'Refreshing…'; }
+    try{
+      const monthsToShow = [];
+      for(let m=0; m<12; m++) monthsToShow.push({year:currentYear, month:m});
+      monthsToShow.push({year:currentYear+1, month:0});
+      monthsToShow.push({year:currentYear+1, month:1});
+      const years = Array.from(new Set(monthsToShow.map(m=>m.year)));
+      years.forEach(y=>{ delete state.schedules[y]; });
+      monthsToShow.forEach(m=>{ delete state.notes[m.year+'-'+m.month]; });
+
+      try{
+        const emp = await storageGet('employees', true);
+        if(emp) state.employees = JSON.parse(emp);
+      }catch(e){}
+      try{
+        const comp = await storageGet('company', true);
+        if(comp) state.company = comp;
+      }catch(e){}
+
+      // Pick up any permission change an administrator just made to this user's own
+      // account (e.g. a newly-granted "Change vacation days/year") so it takes effect
+      // right away instead of only on next login.
+      if(currentUser){
+        try{
+          const freshUsers = await loadUsers();
+          const freshSelf = freshUsers.find(u=>u.id===currentUser.id);
+          if(freshSelf){
+            currentUser.permissions = {...freshSelf.permissions};
+            currentUser.name = freshSelf.name;
+            applyUserToBanner(currentUser);
+          }
+        }catch(e){}
+      }
+
+      rangeStart = null; rangeEnd = null;
+      await renderAll();
+      applyPermissionsToUI();
+    } finally {
+      if(btn){ btn.disabled = false; btn.textContent = originalText; }
+    }
+  }
+  document.getElementById('refreshBtn').onclick = refreshAppData;
+
   // ---------- controls ----------
   document.getElementById('yearPrev').onclick = ()=>{ currentYear--; renderAll(); };
   document.getElementById('yearNext').onclick = ()=>{ currentYear++; renderAll(); };
@@ -1718,7 +1785,7 @@
     const email = document.getElementById('newEmpEmail').value.trim();
     const startDate = document.getElementById('newEmpStart').value; // yyyy-mm-dd or ''
     const vacDaysRaw = document.getElementById('newEmpVacDays').value.trim();
-    const vacDays = vacDaysRaw === '' ? DEFAULT_VACATION_DAYS_PER_YEAR : (parseFloat(vacDaysRaw) || 0);
+    const vacDays = (!can('editVacationDays') || vacDaysRaw === '') ? DEFAULT_VACATION_DAYS_PER_YEAR : (parseFloat(vacDaysRaw) || 0);
     if(!name) return;
     state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null, vacationDaysPerYear: vacDays});
     document.getElementById('newEmpName').value='';
@@ -1831,9 +1898,20 @@
     async function draw(){
       const overrides = await loadLedgerOverrides();
       const rows = await computeYearlyLedger(empId, year, overrides);
+      const annualDays = empVacationDaysPerYear(emp);
+      // "Remaining" only means something when looking at the real current year -- a
+      // past or future year's table doesn't have a "today" row to report a balance as of.
+      const realToday = new Date();
+      const showRemaining = (year === realToday.getFullYear());
+      const remaining = showRemaining ? rows[realToday.getMonth()].end : null;
+
       results.innerHTML =
         '<h4 style="margin:10px 0 6px;">' + emp.name + ' — ' + year + '</h4>' +
-        '<p class="note" style="margin-bottom:8px;">On/Weekend-Stat/Sick/Unpaid are counted through today; months not yet reached show zero there. Vac includes vacation days already booked for later months too, since those already reduce the balance below. Vacation balance: ' + empVacationDaysPerYear(emp) + ' days/year (set in the Employee panel), accruing ' + (empVacationDaysPerYear(emp)/12).toFixed(2) + ' days/month; click an ending figure to correct it.</p>' +
+        '<p class="note" style="margin-bottom:8px;">On/Weekend-Stat/Sick/Unpaid are counted through today; months not yet reached show zero there. Vac includes vacation days already booked for later months too, since those already reduce the balance below. Vacation balance accrues ' + (annualDays/12).toFixed(2) + ' days/month; click an ending figure to correct it.</p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:baseline;margin-bottom:10px;font-size:13.5px;">' +
+          '<div><strong>Vacation days allowed per year:</strong> ' + annualDays + '</div>' +
+          (showRemaining ? '<div><strong>Remaining vacation (as of today):</strong> ' + (remaining===null ? '— (set a starting balance below first)' : remaining.toFixed(2) + ' days') + '</div>' : '') +
+        '</div>' +
         renderLedgerTableHtml(rows, {editable:true});
       wireLedgerOverrideInputs(results, empId, year, draw);
     }
@@ -2028,7 +2106,10 @@
   // ---------- permission gating ----------
   function applyPermissionsToUI(){
     const show = (id, visible)=>{ const el = document.getElementById(id); if(el) el.style.display = visible ? '' : 'none'; };
-    show('addEmpToggle', can('manageEmployees'));
+    show('addEmpToggle', can('manageEmployees') || can('editVacationDays'));
+    show('addEmpForm', can('manageEmployees'));
+    const newVacInput = document.getElementById('newEmpVacDays');
+    if(newVacInput){ newVacInput.disabled = !can('editVacationDays'); newVacInput.style.opacity = can('editVacationDays') ? '' : '.5'; }
     show('backupBtn', can('backupRestore'));
     show('restoreBtn', can('backupRestore'));
     show('manageUsersBtn', can('isAdmin'));
@@ -2182,6 +2263,7 @@
       permissions: {
         editCalendar: document.getElementById('newUserEditCalendar').checked,
         manageEmployees: document.getElementById('newUserManageEmployees').checked,
+        editVacationDays: document.getElementById('newUserEditVacationDays').checked,
         sendEmail: document.getElementById('newUserSendEmail').checked,
         backupRestore: document.getElementById('newUserBackupRestore').checked,
         manageSettings: document.getElementById('newUserManageSettings').checked,
@@ -2630,12 +2712,13 @@
 
       body.innerHTML =
         '<p class="note">Counts below come straight from ' + emp.name + '\'s calendar entries for ' + year + '. On/Weekend-Stat/Sick/Unpaid are counted through today (months not yet reached show zero there); Vac includes vacation days already booked for later months too, since those already reduce the balance below. Weekend/Stat includes weekends, Alberta general holidays, and explicit "Weekend / Stat" overrides.</p>' +
+        '<div style="font-size:13.5px;margin-bottom:10px;"><strong>Vacation days allowed per year:</strong> ' + empVacationDaysPerYear(emp) + '</div>' +
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
           '<label style="font-size:12px;color:var(--grey-strong);">Daily rate ($)</label>' +
           '<input type="number" id="hrRateInput" step="0.001" value="' + storedRate + '" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
         '</div>' +
         renderLedgerTableHtml(rows, {editable:true, showDollar:true, dailyRate:rateNow}) +
-        '<div class="note" style="margin:10px 0 6px;">Vacation balance: ' + empVacationDaysPerYear(emp) + ' days/year (set in the Employee panel), accruing ' + (empVacationDaysPerYear(emp)/12).toFixed(2) + ' days each month, reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Click into any month\'s ending figure to correct it directly; later months then calculate forward from your correction. Clear a box to return to the automatic calculation. "Vac. value ($)" is that month\'s ending balance × the daily rate above.</div>';
+        '<div class="note" style="margin:10px 0 6px;">Vacation balance accrues ' + (empVacationDaysPerYear(emp)/12).toFixed(2) + ' days each month (the per-year figure above ÷ 12, set in the Employee panel), reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Click into any month\'s ending figure to correct it directly; later months then calculate forward from your correction. Clear a box to return to the automatic calculation. "Vac. value ($)" is that month\'s ending balance × the daily rate above.</div>';
 
       document.getElementById('hrRateInput').oninput = (e)=>{
         storedRate = e.target.value;
