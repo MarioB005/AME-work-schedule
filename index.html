@@ -493,6 +493,7 @@
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserEditCalendar" checked style="width:auto;"> Edit calendar</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserManageEmployees" style="width:auto;"> Manage employees</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserEditVacationDays" style="width:auto;"> Change vacation days/year</label>
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserViewVacationDollar" style="width:auto;"> View vacation dollar value</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserSendEmail" checked style="width:auto;"> Send Print &amp; email</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserBackupRestore" style="width:auto;"> Backup / restore</label>
         <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserManageSettings" style="width:auto;"> Change settings</label>
@@ -726,9 +727,9 @@
   // ---------- user accounts & permissions ----------
   // Replaces the old single shared "app_password". Each person gets their own username +
   // password and a checklist of what they're allowed to do, set by an administrator.
-  const DEFAULT_ADMIN_PERMISSIONS = { editCalendar:true, manageEmployees:true, editVacationDays:true, sendEmail:true, backupRestore:true, manageSettings:true, isAdmin:true };
-  const PERMISSION_FIELDS = ['editCalendar','manageEmployees','editVacationDays','sendEmail','backupRestore','manageSettings','isAdmin'];
-  const PERMISSION_LABELS = { editCalendar:'Edit calendar', manageEmployees:'Manage employees', editVacationDays:'Change vacation days/year', sendEmail:'Send Print & email', backupRestore:'Backup / restore', manageSettings:'Change settings', isAdmin:'Administrator' };
+  const DEFAULT_ADMIN_PERMISSIONS = { editCalendar:true, manageEmployees:true, editVacationDays:true, viewVacationDollar:true, sendEmail:true, backupRestore:true, manageSettings:true, isAdmin:true };
+  const PERMISSION_FIELDS = ['editCalendar','manageEmployees','editVacationDays','viewVacationDollar','sendEmail','backupRestore','manageSettings','isAdmin'];
+  const PERMISSION_LABELS = { editCalendar:'Edit calendar', manageEmployees:'Manage employees', editVacationDays:'Change vacation days/year', viewVacationDollar:'View vacation dollar value', sendEmail:'Send Print & email', backupRestore:'Backup / restore', manageSettings:'Change settings', isAdmin:'Administrator' };
 
   let currentUser = null;     // {id, name, username, email, passwordHash, permissions}
   let loginTimestamp = null;  // ISO string set the moment the current session unlocked
@@ -1903,9 +1904,22 @@
     results.innerHTML = '<p class="note">Loading…</p>';
 
     // Same monthly breakdown + vacation-balance ledger as the (Mario-only) HR report,
-    // just without the dollar value, and open to whichever employee/year is selected.
+    // open to whichever employee/year is selected. The dollar column shares the HR
+    // report's own daily-rate figure (one organization-wide rate, same storage key),
+    // but is only ever shown here to someone with the "View vacation dollar value"
+    // permission -- unlike the HR report, this panel has no separate password lock,
+    // so a dollar figure here would otherwise be visible to anyone who can log in at
+    // all.
     const year = currentYear;
     await ensureYearLoaded(year);
+    const canViewDollar = can('viewVacationDollar');
+    let storedRate = HR_RATE_DEFAULT;
+    if(canViewDollar){
+      try{
+        const raw = await storageGet('hrVacationRate', true);
+        if(raw) storedRate = parseFloat(raw) || HR_RATE_DEFAULT;
+      }catch(e){}
+    }
 
     async function draw(){
       const overrides = await loadLedgerOverrides();
@@ -1913,6 +1927,8 @@
       const rows = await computeYearlyLedger(empId, year, overrides, corrections);
       const annualDays = empVacationDaysForYear(emp, year);
       const canEditBalances = can('editVacationDays');
+      const hasOwnYearValue = !!(emp.vacationDaysByYear && Object.prototype.hasOwnProperty.call(emp.vacationDaysByYear, year));
+      const rateNow = parseFloat(storedRate) || 0;
       // "Remaining" only means something when looking at the real current year -- a
       // past or future year's table doesn't have a "today" row to report a balance as of.
       const realToday = new Date();
@@ -1922,11 +1938,37 @@
       results.innerHTML =
         '<h4 style="margin:10px 0 6px;">' + emp.name + ' — ' + year + '</h4>' +
         '<p class="note" style="margin-bottom:8px;">On/Weekend-Stat/Sick/Unpaid are counted through today; months not yet reached show zero there. Vac includes vacation days already booked for later months too, since those already reduce the balance below. Vacation balance accrues ' + (annualDays/12).toFixed(2) + ' days/month' + (canEditBalances ? '; use the Correction column to adjust a month, or the ending-balance column to set an exact figure' : '') + '.</p>' +
-        '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:baseline;margin-bottom:10px;font-size:13.5px;">' +
-          '<div><strong>Vacation days allowed per year:</strong> ' + annualDays + '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center;margin-bottom:10px;font-size:13.5px;">' +
+          (canEditBalances ?
+            '<div style="display:flex;align-items:center;gap:6px;"><label for="summaryVacDaysInput"><strong>Vacation days allowed per year (' + year + ')</strong></label><input type="number" id="summaryVacDaysInput" min="0" step="0.5" placeholder="' + annualDays + '" value="' + (hasOwnYearValue ? emp.vacationDaysByYear[year] : '') + '" title="Leave blank to keep carrying forward from an earlier year" style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;"></div>'
+            : '<div><strong>Vacation days allowed per year:</strong> ' + annualDays + '</div>'
+          ) +
           (showRemaining ? '<div><strong>Remaining vacation (as of today):</strong> ' + (remaining===null ? '— (set a starting balance below first)' : remaining.toFixed(2) + ' days') + '</div>' : '') +
         '</div>' +
-        renderLedgerTableHtml(rows, {editable:canEditBalances});
+        (canViewDollar ?
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
+            '<label style="font-size:12px;color:var(--grey-strong);">Daily rate ($)</label>' +
+            '<input type="number" id="summaryRateInput" step="0.001" value="' + storedRate + '" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
+          '</div>'
+        : '') +
+        renderLedgerTableHtml(rows, {editable:canEditBalances, showDollar:canViewDollar, dailyRate:rateNow});
+      if(canViewDollar){
+        document.getElementById('summaryRateInput').oninput = (e)=>{
+          storedRate = e.target.value;
+          updateLedgerDollarColumn(results, parseFloat(storedRate) || 0);
+        };
+        document.getElementById('summaryRateInput').onblur = ()=>{
+          storageSet('hrVacationRate', document.getElementById('summaryRateInput').value, true);
+        };
+      }
+      if(canEditBalances){
+        const vacDaysEl = document.getElementById('summaryVacDaysInput');
+        vacDaysEl.onkeydown = (e)=>{ if(e.key === 'Enter') vacDaysEl.blur(); };
+        vacDaysEl.onblur = async ()=>{
+          await saveEmpAnnualVacDays(emp, year, vacDaysEl.value, 'Employee summary');
+          await draw();
+        };
+      }
       wireLedgerOverrideInputs(results, empId, year, draw);
     }
     await draw();
@@ -2278,6 +2320,7 @@
         editCalendar: document.getElementById('newUserEditCalendar').checked,
         manageEmployees: document.getElementById('newUserManageEmployees').checked,
         editVacationDays: document.getElementById('newUserEditVacationDays').checked,
+        viewVacationDollar: document.getElementById('newUserViewVacationDollar').checked,
         sendEmail: document.getElementById('newUserSendEmail').checked,
         backupRestore: document.getElementById('newUserBackupRestore').checked,
         manageSettings: document.getElementById('newUserManageSettings').checked,
@@ -2526,6 +2569,18 @@
     }
     const legacy = emp && emp.vacationDaysPerYear;
     return (typeof legacy === 'number' && isFinite(legacy) && legacy >= 0) ? legacy : DEFAULT_VACATION_DAYS_PER_YEAR;
+  }
+
+  // Lets the allowance be edited directly from the HR report / Employee summary screens,
+  // not just the Manage Employees panel -- same underlying data (emp.vacationDaysByYear),
+  // same blank-means-carry-forward semantics as that panel's own field.
+  async function saveEmpAnnualVacDays(emp, year, rawValue, source){
+    const raw = (rawValue || '').trim();
+    emp.vacationDaysByYear = emp.vacationDaysByYear || {};
+    if(raw === ''){ delete emp.vacationDaysByYear[year]; }
+    else { emp.vacationDaysByYear[year] = parseFloat(raw) || 0; }
+    await saveEmployees();
+    await logEmployeeChange('edited', emp.name, 'vacation days/yr (' + year + ') changed from ' + source);
   }
 
   // Day-type counts for one employee for one month (On/Weekend-Stat/Vac/Sick/Unpaid).
@@ -2786,16 +2841,20 @@
       const rows = await computeYearlyLedger(emp.id, year, overridesNow, correctionsNow);
       const rateNow = parseFloat(storedRate) || 0;
       const annualDays = empVacationDaysForYear(emp, year);
+      const hasOwnYearValue = !!(emp.vacationDaysByYear && Object.prototype.hasOwnProperty.call(emp.vacationDaysByYear, year));
 
       body.innerHTML =
         '<p class="note">Counts below come straight from ' + emp.name + '\'s calendar entries for ' + year + '. On/Weekend-Stat/Sick/Unpaid are counted through today (months not yet reached show zero there); Vac includes vacation days already booked for later months too, since those already reduce the balance below. Weekend/Stat includes weekends, Alberta general holidays, and explicit "Weekend / Stat" overrides.</p>' +
-        '<div style="font-size:13.5px;margin-bottom:10px;"><strong>Vacation days allowed per year:</strong> ' + annualDays + '</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;font-size:13.5px;">' +
+          '<label for="hrVacDaysInput"><strong>Vacation days allowed per year (' + year + ')</strong></label>' +
+          '<input type="number" id="hrVacDaysInput" min="0" step="0.5" placeholder="' + annualDays + '" value="' + (hasOwnYearValue ? emp.vacationDaysByYear[year] : '') + '" title="Leave blank to keep carrying forward from an earlier year" style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;">' +
+        '</div>' +
         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">' +
           '<label style="font-size:12px;color:var(--grey-strong);">Daily rate ($)</label>' +
           '<input type="number" id="hrRateInput" step="0.001" value="' + storedRate + '" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;">' +
         '</div>' +
         renderLedgerTableHtml(rows, {editable:true, showDollar:true, dailyRate:rateNow}) +
-        '<div class="note" style="margin:10px 0 6px;">Vacation balance accrues ' + (annualDays/12).toFixed(2) + ' days each month (the per-year figure above ÷ 12, set in the Employee panel), reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Use the Correction column to nudge a month up or down by a known amount; use the ending-balance column when you need to set an exact figure instead (for example, the very first month this ledger starts tracking from). Clear a box to return to the automatic calculation. "Vac. value ($)" is that month\'s ending balance × the daily rate above.</div>';
+        '<div class="note" style="margin:10px 0 6px;">Vacation balance accrues ' + (annualDays/12).toFixed(2) + ' days each month (the per-year figure above ÷ 12 — edit it directly above for ' + year + ' specifically, or leave it blank to keep carrying forward whatever an earlier year was set to), reduced by every vacation day (full or half) recorded that month — including days already booked for the future. Use the Correction column to nudge a month up or down by a known amount; use the ending-balance column when you need to set an exact figure instead (for example, the very first month this ledger starts tracking from). Clear a box to return to the automatic calculation. "Vac. value ($)" is that month\'s ending balance × the daily rate above.</div>';
 
       document.getElementById('hrRateInput').oninput = (e)=>{
         storedRate = e.target.value;
@@ -2803,6 +2862,12 @@
       };
       document.getElementById('hrRateInput').onblur = ()=>{
         storageSet('hrVacationRate', document.getElementById('hrRateInput').value, true);
+      };
+      const hrVacDaysEl = document.getElementById('hrVacDaysInput');
+      hrVacDaysEl.onkeydown = (e)=>{ if(e.key === 'Enter') hrVacDaysEl.blur(); };
+      hrVacDaysEl.onblur = async ()=>{
+        await saveEmpAnnualVacDays(emp, year, hrVacDaysEl.value, 'HR report');
+        await draw();
       };
 
       wireLedgerOverrideInputs(body, emp.id, year, draw);
