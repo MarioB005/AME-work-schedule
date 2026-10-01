@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Work Schedule</title>
 <style>
+  /* Masks these fields visually like a password box without ever using type="password" --
+     Chrome's password manager keys off that attribute specifically, and on this app that
+     led to repeated unwanted "Save/Update password?" prompts even after clearing the
+     fields' values on every success path. Plain text + this masking sidesteps it entirely. */
+  .pw-mask{
+    -webkit-text-security: disc;
+    text-security: disc;
+  }
   :root{
     --ink:#1c2b24;
     --paper:#fbfaf6;
@@ -27,6 +35,8 @@
     --grey:#cfcabe;
     --grey-strong:#6b6558;
     --accent:#c05a2c;
+    --dayoff:#c9a0dc;
+    --dayoff-strong:#6b3fa0;
     --radius:10px;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   }
@@ -143,7 +153,7 @@
   td.cell{cursor:pointer;user-select:none;}
   td.cell.weekend, td.cell.holiday{background:var(--yellow);}
   td.cell.work{background:var(--green);}
-  td.cell.OFF{background:var(--red);}
+  td.cell.OFF{background:var(--dayoff);}
   td.cell.SICK{background:var(--skyblue);}
   td.cell.VAC{background:var(--vacation);}
   td.cell.REQ{background:var(--grey);}
@@ -152,7 +162,7 @@
   }
   .swatch.weekend{background:var(--yellow);}
   .swatch.work{background:var(--green);}
-  .swatch.OFF{background:var(--red);}
+  .swatch.OFF{background:var(--dayoff);}
   .swatch.SICK{background:var(--skyblue);}
   .swatch.VAC{background:var(--vacation);}
   .swatch.REQ{background:var(--grey);}
@@ -271,8 +281,8 @@
       <input type="text" id="gateUser" name="username" placeholder="Username" autocomplete="username">
       <input type="text" id="gateName" placeholder="Your name" style="display:none;" autocomplete="name">
       <input type="email" id="gateEmail" placeholder="Email (optional — needed if you want others to be able to email you)" style="display:none;" autocomplete="email">
-      <input type="password" id="gatePass" name="password" placeholder="Password" autocomplete="current-password">
-      <input type="password" id="gatePass2" placeholder="Confirm password" style="display:none;" autocomplete="new-password">
+      <input type="text" id="gatePass" class="pw-mask" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <input type="text" id="gatePass2" class="pw-mask" placeholder="Confirm password" style="display:none;" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button id="gateBtn" type="submit">Log in</button>
     </form>
     <button type="button" id="forgotPassLink" class="gate-link-btn">Forgot your password?</button>
@@ -370,6 +380,7 @@
         <div class="field"><label>Email</label><input id="newEmpEmail" placeholder="name@company.com"></div>
         <div class="field"><label>Start date (optional)</label><input id="newEmpStart" type="date"></div>
         <div class="field"><label>Vacation days/year</label><input id="newEmpVacDays" type="number" min="0" step="0.5" placeholder="30"></div>
+        <div class="field"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:5px;font-weight:normal;padding-top:7px;"><input type="checkbox" id="newEmpContractor"> Contractor (21 on / 15 off — adjust after adding)</label></div>
         <button id="addEmpBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--line);cursor:pointer;">Add</button>
       </div>
       <div class="emp-list" id="empList"></div>
@@ -413,7 +424,7 @@
     <h3>⚠ This day already happened</h3>
     <p class="note">Changing a past date is unusual and gets logged. Enter your password to confirm.</p>
     <div class="gate-error" id="pastEditError"></div>
-    <input type="password" id="pastEditPass" placeholder="Password" autocomplete="off" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;">
+    <input type="text" id="pastEditPass" class="pw-mask" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;">
     <button id="pastEditOkBtn">Confirm change</button>
     <button id="pastEditCancelBtn">Cancel</button>
   </div>
@@ -446,6 +457,35 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="contractorGenModalBackdrop">
+  <div class="modal" style="max-width:420px;">
+    <h3 id="contractorGenTitle">Generate contractor schedule</h3>
+    <p class="note">Fills in <strong id="contractorGenEmpName">—</strong>'s calendar over a date range with a repeating block: some number of days on, then some number off — repeating until the end date. Days ON are cleared to the normal default (so they're never auto-shaded as a weekend/stat day off); days OFF are marked "Day off". This overwrites whatever is already on the calendar within the range — anything outside the range is untouched. You can re-run this any time the rotation needs to change.</p>
+    <div class="field" style="margin-bottom:8px;">
+      <label>Start date</label>
+      <input type="date" id="contractorGenStart" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px;">
+    </div>
+    <div class="field" style="margin-bottom:8px;">
+      <label>End date</label>
+      <input type="date" id="contractorGenEnd" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px;">
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:8px;">
+      <div class="field" style="flex:1;">
+        <label>Days on</label>
+        <input type="number" id="contractorGenOn" min="1" step="1" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px;">
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Days off</label>
+        <input type="number" id="contractorGenOff" min="1" step="1" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px;">
+      </div>
+    </div>
+    <p class="note" style="margin-bottom:8px;">The rotation starts with an ON block on the start date you pick. These on/off counts are also saved as this employee's own defaults for next time.</p>
+    <div class="gate-error" id="contractorGenError"></div>
+    <button id="contractorGenOkBtn">Generate</button>
+    <button id="contractorGenCancelBtn">Cancel</button>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="emailModalBackdrop">
   <div class="modal">
     <h3>Print &amp; email the schedule</h3>
@@ -461,8 +501,8 @@
     <div id="hrGateSection">
       <p class="note">This report is protected by its own separate password (not the schedule's password).</p>
       <div class="gate-error" id="hrGateError"></div>
-      <input type="password" id="hrGatePass" placeholder="Password" autocomplete="off" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;">
-      <input type="password" id="hrGatePass2" placeholder="Confirm password" style="display:none;width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;" autocomplete="off">
+      <input type="text" id="hrGatePass" class="pw-mask" placeholder="Password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;">
+      <input type="text" id="hrGatePass2" class="pw-mask" placeholder="Confirm password" style="display:none;width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:14px;margin-bottom:8px;" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button id="hrGateBtn">Unlock</button>
     </div>
     <div id="hrReportSection" style="display:none;">
@@ -533,6 +573,7 @@
     {key:'SICK',   label:'Sick day',            status:'SICK', shift:null, swatch:'SICK'},
     {key:'HALF_SICK', label:'Half day sick', status:'HALF', shift:null, half:'SICK', swatch:'half-sick'},
     {key:'UNPAID', label:'Unpaid day off',      status:'UNPAID', shift:null, swatch:'UNPAID'},
+    {key:'OFF',    label:'Day off',             status:'OFF',  shift:null, swatch:'OFF'},
     {key:'HALF_OFF',  label:'Half day off',  status:'HALF', shift:null, half:'OFF',  swatch:'half-off'},
   ];
   const STATUS_LABEL = {WORK:'Work day', OFF:'Day off', VAC:'Vacation', SICK:'Sick day', REQ:'Requested day off', UNPAID:'Unpaid day off', STAT:'Weekend / Stat'};
@@ -1029,6 +1070,7 @@
       ];
     }
     await migrateRemoveOksana();
+    await migrateDefaultContractors();
   }
   async function saveEmployees(){
     await storageSet('employees', JSON.stringify(state.employees), true);
@@ -1171,6 +1213,8 @@
   // Tallies status counts for one employee across a day range within a single month.
   function computeStatsForRange(empId, year, month, dayFrom, dayTo){
     const holidays = albertaHolidays(year);
+    const emp = state.employees.find(e=>e.id===empId);
+    const isContractor = empIsContractor(emp);
     const totals = {on:0, extra:0, off:0, vac:0, sick:0, req:0, unpaid:0};
     for(let d=dayFrom; d<=dayTo; d++){
       const dateObj = new Date(year, month, d);
@@ -1178,7 +1222,11 @@
       const hKey = fmtKey(dateObj);
       const isHoliday = !!holidays[hKey];
       const rec = getCell(year, month, d, empId);
-      const status = rec ? rec.status : ((weekend||isHoliday) ? null : 'WORK');
+      // Contractors work a rotating on/off block schedule instead of a Mon-Fri week, so an
+      // untouched cell for them defaults to a work day even on a weekend/holiday -- only an
+      // explicit "Day off" (or other status) makes it not a work day. Everyone else keeps the
+      // original behaviour: an untouched weekend/holiday cell is automatic time off.
+      const status = rec ? rec.status : ((weekend||isHoliday) && !isContractor ? null : 'WORK');
       const half = rec ? (rec.half || null) : null;
       const moved = rec ? !!rec.moved : false;
       if(status==='WORK'){ totals.on++; if(moved) totals.extra++; }
@@ -1323,9 +1371,14 @@
         const shift = rec ? rec.shift : null;
         const half = rec ? (rec.half || null) : null;
         const moved = rec ? !!rec.moved : false;
+        // Contractors rotate through on/off blocks rather than a Mon-Fri week, so their
+        // untouched cells shouldn't auto-shade as a weekend/stat day off -- they default to
+        // a normal work day every day of the week, until a "Day off" (or other status) is
+        // explicitly set (usually via the schedule generator).
+        const autoWeekend = (weekend || isHoliday) && !emp.isContractor;
 
         if(status===null){
-          td.classList.add((weekend || isHoliday) ? 'weekend' : 'work');
+          td.classList.add(autoWeekend ? 'weekend' : 'work');
         } else if(status==='WORK'){
           td.classList.add('work');
         } else if(status==='STAT'){
@@ -1362,7 +1415,7 @@
           td.appendChild(span);
         }
 
-        let tooltip = shift ? SHIFT_LABEL[shift] : (status==='HALF' ? (half==='SICK' ? 'Half day sick' : (half==='VAC' ? 'Half day vacation' : 'Half day off')) : (status ? STATUS_LABEL[status] : ((weekend||isHoliday) ? 'Weekend/holiday (default off)' : 'Work day (default)')));
+        let tooltip = shift ? SHIFT_LABEL[shift] : (status==='HALF' ? (half==='SICK' ? 'Half day sick' : (half==='VAC' ? 'Half day vacation' : 'Half day off')) : (status ? STATUS_LABEL[status] : (autoWeekend ? 'Weekend/holiday (default off)' : 'Work day (default)')));
         if(status==='OFF' && moved) tooltip = 'Weekend / Stat';
         else if(moved) tooltip += ' (moved)';
         if(isPast && !forPrint) tooltip += ' — past date, password required to change';
@@ -1617,6 +1670,58 @@
         const vacDaysLabel = document.createElement('span');
         vacDaysLabel.textContent = currentYear + ':';
         vacDaysLabel.style.cssText = 'font-size:11.5px;color:var(--grey-strong);align-self:center;';
+
+        // Contractor settings: on/off rotation block + whether they accrue vacation/sick at
+        // all. These only make sense once "Contractor" is checked, so the on/off/vac-sick
+        // controls show or hide live as that checkbox is toggled, with no re-render needed.
+        const contractorWrap = document.createElement('label');
+        contractorWrap.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--grey-strong);';
+        const contractorCb = document.createElement('input');
+        contractorCb.type = 'checkbox';
+        contractorCb.checked = empIsContractor(emp);
+        contractorCb.disabled = !canManage;
+        contractorWrap.appendChild(contractorCb);
+        contractorWrap.appendChild(document.createTextNode('Contractor'));
+
+        const onInput = document.createElement('input');
+        onInput.type = 'number'; onInput.min = '1'; onInput.step = '1';
+        onInput.value = (typeof emp.contractorOnDays === 'number') ? emp.contractorOnDays : '';
+        onInput.placeholder = String(empContractorOnDays(emp));
+        onInput.title = 'Days ON per rotation block';
+        onInput.disabled = !canManage;
+        onInput.style.cssText = 'width:42px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;font-size:12px;' + (canManage ? '' : 'opacity:.5;');
+        const onOffSep = document.createElement('span');
+        onOffSep.textContent = 'on /';
+        onOffSep.style.cssText = 'font-size:11.5px;color:var(--grey-strong);';
+        const offInput = document.createElement('input');
+        offInput.type = 'number'; offInput.min = '1'; offInput.step = '1';
+        offInput.value = (typeof emp.contractorOffDays === 'number') ? emp.contractorOffDays : '';
+        offInput.placeholder = String(empContractorOffDays(emp));
+        offInput.title = 'Days OFF per rotation block';
+        offInput.disabled = !canManage;
+        offInput.style.cssText = 'width:42px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;font-size:12px;' + (canManage ? '' : 'opacity:.5;');
+        const offLabel = document.createElement('span');
+        offLabel.textContent = 'off';
+        offLabel.style.cssText = 'font-size:11.5px;color:var(--grey-strong);';
+
+        const vacSickWrap = document.createElement('label');
+        vacSickWrap.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--grey-strong);';
+        const vacSickCb = document.createElement('input');
+        vacSickCb.type = 'checkbox';
+        vacSickCb.checked = !!emp.contractorHasVacSick;
+        vacSickCb.disabled = !canManage;
+        vacSickWrap.appendChild(vacSickCb);
+        vacSickWrap.appendChild(document.createTextNode('Has vacation/sick days'));
+
+        function updateContractorFieldsVisibility(){
+          const show = contractorCb.checked ? '' : 'none';
+          onInput.style.display = show; onOffSep.style.display = show;
+          offInput.style.display = show; offLabel.style.display = show;
+          vacSickWrap.style.display = show;
+        }
+        contractorCb.onchange = updateContractorFieldsVisibility;
+        updateContractorFieldsVisibility();
+
         const saveBtn = document.createElement('button');
         saveBtn.textContent = 'Save'; saveBtn.style.color = 'var(--green-strong)';
         saveBtn.onclick = ()=>{
@@ -1627,6 +1732,12 @@
             emp.name = newName;
             emp.email = emailInput.value.trim();
             emp.hiredDate = startInput.value || null;
+            emp.isContractor = contractorCb.checked;
+            const onRaw = onInput.value.trim();
+            if(onRaw === ''){ delete emp.contractorOnDays; } else { emp.contractorOnDays = parseFloat(onRaw) || CONTRACTOR_ON_DEFAULT; }
+            const offRaw = offInput.value.trim();
+            if(offRaw === ''){ delete emp.contractorOffDays; } else { emp.contractorOffDays = parseFloat(offRaw) || CONTRACTOR_OFF_DEFAULT; }
+            emp.contractorHasVacSick = vacSickCb.checked;
           }
           if(canVac){
             const vacDaysRaw = vacDaysInput.value.trim();
@@ -1643,11 +1754,13 @@
         cancelBtn.textContent = 'Cancel';
         cancelBtn.onclick = ()=>{ editingEmpId = null; renderAll(); };
 
-        row.appendChild(nameInput); row.appendChild(emailInput); row.appendChild(startInput); row.appendChild(vacDaysLabel); row.appendChild(vacDaysInput); row.appendChild(saveBtn); row.appendChild(cancelBtn);
+        row.appendChild(nameInput); row.appendChild(emailInput); row.appendChild(startInput); row.appendChild(vacDaysLabel); row.appendChild(vacDaysInput);
+        row.appendChild(contractorWrap); row.appendChild(onInput); row.appendChild(onOffSep); row.appendChild(offInput); row.appendChild(offLabel); row.appendChild(vacSickWrap);
+        row.appendChild(saveBtn); row.appendChild(cancelBtn);
       } else {
-        const name = document.createElement('span'); name.className='name'; name.textContent = emp.name;
+        const name = document.createElement('span'); name.className='name'; name.textContent = emp.name + (empIsContractor(emp) ? ' (contractor)' : '');
         const email = document.createElement('span'); email.className='email';
-        email.textContent = (emp.email || '(no email)') + (emp.hiredDate ? (' — starts ' + emp.hiredDate) : '') + ' — ' + empVacationDaysForYear(emp, currentYear) + ' vac days/yr (' + currentYear + ')';
+        email.textContent = (emp.email || '(no email)') + (emp.hiredDate ? (' — starts ' + emp.hiredDate) : '') + ' — ' + (empIsContractor(emp) ? (empContractorOnDays(emp) + ' on / ' + empContractorOffDays(emp) + ' off' + (empHasVacSick(emp) ? ', has vac/sick' : ', no vac/sick')) : (empVacationDaysForYear(emp, currentYear) + ' vac days/yr (' + currentYear + ')'));
         const edit = document.createElement('button'); edit.textContent='Edit'; edit.style.color = 'var(--blue-past-strong)';
         edit.onclick = ()=>{ editingEmpId = emp.id; renderAll(); };
         const del = document.createElement('button'); del.textContent='Remove';
@@ -1662,7 +1775,15 @@
           logEmployeeChange('removed', emp.name);
           renderAll();
         };
-        row.appendChild(name); row.appendChild(email); row.appendChild(edit); row.appendChild(del);
+        row.appendChild(name); row.appendChild(email); row.appendChild(edit);
+        if(empIsContractor(emp)){
+          const genBtn = document.createElement('button'); genBtn.textContent = 'Generate schedule…'; genBtn.style.color = 'var(--vacation-strong)';
+          genBtn.disabled = !can('editCalendar');
+          if(genBtn.disabled) genBtn.style.opacity = '.5';
+          genBtn.onclick = ()=> openContractorGenDialog(emp);
+          row.appendChild(genBtn);
+        }
+        row.appendChild(del);
       }
 
       list.appendChild(row);
@@ -1830,12 +1951,14 @@
     const startDate = document.getElementById('newEmpStart').value; // yyyy-mm-dd or ''
     const vacDaysRaw = document.getElementById('newEmpVacDays').value.trim();
     const vacationDaysByYear = (can('editVacationDays') && vacDaysRaw !== '') ? {[currentYear]: parseFloat(vacDaysRaw) || 0} : {};
+    const isContractor = document.getElementById('newEmpContractor').checked;
     if(!name) return;
-    state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null, vacationDaysByYear});
+    state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null, vacationDaysByYear, isContractor});
     document.getElementById('newEmpName').value='';
     document.getElementById('newEmpEmail').value='';
     document.getElementById('newEmpStart').value='';
     document.getElementById('newEmpVacDays').value='';
+    document.getElementById('newEmpContractor').checked=false;
     saveEmployees();
     logEmployeeChange('added', name);
     renderAll();
@@ -1924,13 +2047,114 @@
       .forEach(emp=>{
         const opt = document.createElement('option');
         opt.value = emp.id;
-        opt.textContent = emp.name + (emp.active===false ? ' (removed)' : '');
+        opt.textContent = emp.name + (empIsContractor(emp) ? ' (contractor)' : '') + (emp.active===false ? ' (removed)' : '');
         summarySelect.appendChild(opt);
       });
     summaryBackdrop.classList.add('show');
     await renderSummaryResults();
   };
   document.getElementById('summaryCloseBtn').onclick = ()=>{ summaryBackdrop.classList.remove('show'); };
+
+  // ---------- contractor schedule generator ----------
+  const contractorGenBackdrop = document.getElementById('contractorGenModalBackdrop');
+  let contractorGenEmp = null;
+  function openContractorGenDialog(emp){
+    if(!can('editCalendar')){ alert('You do not have permission to edit the calendar.'); return; }
+    contractorGenEmp = emp;
+    document.getElementById('contractorGenEmpName').textContent = emp.name;
+    document.getElementById('contractorGenStart').value = '';
+    document.getElementById('contractorGenEnd').value = '';
+    document.getElementById('contractorGenOn').value = empContractorOnDays(emp);
+    document.getElementById('contractorGenOff').value = empContractorOffDays(emp);
+    document.getElementById('contractorGenError').textContent = '';
+    contractorGenBackdrop.classList.add('show');
+  }
+  document.getElementById('contractorGenCancelBtn').onclick = ()=>{ contractorGenBackdrop.classList.remove('show'); contractorGenEmp = null; };
+
+  // Writes a repeating on/off block rotation into one contractor's calendar across
+  // [startDate, endDate] inclusive, which can span multiple months and years. ON days are
+  // cleared to the automatic default (status null — a plain work day for a contractor, per
+  // the weekend-shading exclusion above); OFF days get the explicit "Day off" status. Every
+  // year touched is loaded and saved individually since the schedule is stored per year.
+  async function generateContractorSchedule(emp, startDate, endDate, onDays, offDays){
+    const years = Array.from(new Set([startDate.getFullYear(), endDate.getFullYear()]));
+    for(let y = years[0]; y <= years[years.length-1]; y++) await ensureYearLoaded(y);
+
+    const pastEntries = [];
+    const yearsTouched = new Set();
+    let blockPos = 0; // 0..(onDays+offDays-1) within the repeating block, starting on an ON day
+    for(let d = new Date(startDate); d <= endDate; d.setDate(d.getDate()+1)){
+      const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+      const isOffDay = blockPos >= onDays;
+      const prev = getCell(y, m, day, emp.id);
+      const next = isOffDay ? {status:'OFF', shift:null, half:null, moved:false} : null;
+      if(isPastDate(y, m, day)){
+        pastEntries.push({ts:new Date().toISOString(), month:m, day, empId:emp.id, empName:emp.name, before:prev, after:next, year:y});
+      }
+      setCellLocal(y, m, day, emp.id, next);
+      yearsTouched.add(y);
+      blockPos = (blockPos + 1) % (onDays + offDays);
+    }
+
+    if(pastEntries.length){
+      const byYear = {};
+      pastEntries.forEach(e=>{ (byYear[e.year] = byYear[e.year]||[]).push(e); });
+      for(const y of Object.keys(byYear)){
+        let arr = [];
+        try{ const raw = await storageGet('archive:'+y, true); arr = raw ? JSON.parse(raw) : []; }catch(e){}
+        arr.push(...byYear[y]);
+        await storageSet('archive:'+y, JSON.stringify(arr), true);
+      }
+    }
+    for(const y of yearsTouched) await saveYear(y);
+    await logEmployeeChange('edited', emp.name, 'generated contractor schedule ' + fmtKey(startDate) + ' to ' + fmtKey(endDate) + ' (' + onDays + ' on / ' + offDays + ' off)');
+  }
+
+  document.getElementById('contractorGenOkBtn').onclick = async ()=>{
+    const err = document.getElementById('contractorGenError');
+    err.textContent = '';
+    if(!contractorGenEmp) return;
+    const startRaw = document.getElementById('contractorGenStart').value;
+    const endRaw = document.getElementById('contractorGenEnd').value;
+    const onDays = parseInt(document.getElementById('contractorGenOn').value, 10);
+    const offDays = parseInt(document.getElementById('contractorGenOff').value, 10);
+    if(!startRaw || !endRaw){ err.textContent = 'Pick both a start and an end date.'; return; }
+    // yyyy-mm-dd parsed as local calendar dates, not UTC, so they land on the day actually
+    // picked regardless of the browser's time zone.
+    const [sy,sm,sd] = startRaw.split('-').map(Number);
+    const [ey,em,ed] = endRaw.split('-').map(Number);
+    const startDate = new Date(sy, sm-1, sd);
+    const endDate = new Date(ey, em-1, ed);
+    if(endDate < startDate){ err.textContent = 'End date must be on or after the start date.'; return; }
+    if(!onDays || onDays < 1 || !offDays || offDays < 1){ err.textContent = 'Days on/off must each be at least 1.'; return; }
+    const spanDays = Math.round((endDate - startDate) / 86400000) + 1;
+    if(spanDays > 3660){ err.textContent = 'That range is too long (max ~10 years) — narrow it down.'; return; }
+
+    let anyPast = false;
+    for(let d = new Date(startDate); d <= endDate; d.setDate(d.getDate()+1)){
+      if(isPastDate(d.getFullYear(), d.getMonth(), d.getDate())){ anyPast = true; break; }
+    }
+    if(anyPast){
+      // Hide this modal first -- both modal-backdrops share the same z-index, and with this
+      // one still open (and later in the DOM) it would paint on top of the past-edit
+      // password modal and swallow clicks meant for it. Bring it back if they cancel.
+      contractorGenBackdrop.classList.remove('show');
+      const ok = await requestPastEditPassword();
+      if(!ok){ contractorGenBackdrop.classList.add('show'); return; }
+      contractorGenBackdrop.classList.add('show');
+    }
+
+    if(!confirm('This will overwrite ' + contractorGenEmp.name + '\'s calendar from ' + startRaw + ' to ' + endRaw + ' (' + spanDays + ' days) with a ' + onDays + ' on / ' + offDays + ' off rotation, replacing anything already entered in that range. Continue?')) return;
+
+    const emp = contractorGenEmp;
+    emp.contractorOnDays = onDays;
+    emp.contractorOffDays = offDays;
+    await saveEmployees();
+    await generateContractorSchedule(emp, startDate, endDate, onDays, offDays);
+    contractorGenBackdrop.classList.remove('show');
+    contractorGenEmp = null;
+    renderAll();
+  };
   summarySelect.onchange = renderSummaryResults;
 
   // Guards against a slow-to-finish save (e.g. the rate or vacation-days field, which
@@ -1946,6 +2170,11 @@
     const emp = state.employees.find(e=>e.id===empId);
     const results = document.getElementById('summaryResults');
     if(!emp){ results.innerHTML = ''; return; }
+    if(!empHasVacSick(emp)){
+      results.innerHTML = '<h4 style="margin:10px 0 6px;">' + emp.name + ' (contractor)</h4>' +
+        '<p class="note">This contractor doesn\'t accrue vacation or sick days — there\'s no ledger to show. Turn on "Has vacation/sick days" for them in the Employee panel if that changes.</p>';
+      return;
+    }
     results.innerHTML = '<p class="note">Loading…</p>';
 
     // Same monthly breakdown + vacation-balance ledger as the (Mario-only) HR report,
@@ -2657,6 +2886,49 @@
     }catch(e){}
   }
 
+  // ---------- contractor rotation schedules ----------
+  // A contractor (e.g. a fly-in/fly-out worker) doesn't follow a Mon-Fri week -- they work
+  // rotating blocks, typically some number of days on followed by some number off, which can
+  // fall on any day including weekends. emp.isContractor flips their row's automatic
+  // weekend/stat shading off entirely (see computeStatsForRange / computeDayStatsForMonth /
+  // buildMonthTable): an untouched cell for them defaults to a work day, every day of the
+  // week, until the generator below (or a manual "Day off" from the legend) explicitly marks
+  // a day off. emp.contractorOnDays/contractorOffDays are just this employee's own saved
+  // defaults for the generator's "On days"/"Off days" fields -- they don't limit what's
+  // already on the calendar, and can be changed at any time without affecting past runs.
+  const CONTRACTOR_ON_DEFAULT = 21;
+  const CONTRACTOR_OFF_DEFAULT = 15;
+  function empIsContractor(emp){ return !!(emp && emp.isContractor); }
+  function empContractorOnDays(emp){
+    const v = emp && emp.contractorOnDays;
+    return (typeof v === 'number' && isFinite(v) && v > 0) ? v : CONTRACTOR_ON_DEFAULT;
+  }
+  function empContractorOffDays(emp){
+    const v = emp && emp.contractorOffDays;
+    return (typeof v === 'number' && isFinite(v) && v > 0) ? v : CONTRACTOR_OFF_DEFAULT;
+  }
+  // Whether this employee accrues/uses vacation and sick days at all. Always true for a
+  // regular employee; for a contractor it's only true once the "Has vacation/sick days"
+  // checkbox has been explicitly turned on for them, since some contractors are paid a flat
+  // day rate with no vacation/sick entitlement at all.
+  function empHasVacSick(emp){
+    return empIsContractor(emp) ? !!emp.contractorHasVacSick : true;
+  }
+  // One-time default: the user identified Randy and Richard by name as the two contractors
+  // on the team today. This only ever fills in isContractor the first time (when the field
+  // has never been set either way), so flipping it back off later for either of them sticks.
+  async function migrateDefaultContractors(){
+    let changed = false;
+    state.employees.forEach(e=>{
+      const n = e.name && e.name.trim();
+      if((n === 'Randy' || n === 'Richard') && e.isContractor === undefined){
+        e.isContractor = true;
+        changed = true;
+      }
+    });
+    if(changed) await saveEmployees();
+  }
+
   // Day-type counts for one employee for one month (On/Weekend-Stat/Vac/Sick/Unpaid).
   // Work/Weekend/Sick/Unpaid are capped at today: a month that hasn't started yet shows
   // zero for those, and the current month only counts through today, so nothing in the
@@ -2667,6 +2939,8 @@
   // to drop with no visible vacation day to explain it; keeping them identical fixes that.
   function computeDayStatsForMonth(empId, year, month){
     const holidays = albertaHolidays(year);
+    const emp = state.employees.find(e=>e.id===empId);
+    const isContractor = empIsContractor(emp);
     const realToday = new Date(); realToday.setHours(0,0,0,0);
     const totals = {work:0, weekend:0, vac: countVacationDaysInMonth(empId, year, month), sick:0, unpaid:0};
     if(new Date(year, month, 1) > realToday) return totals;
@@ -2680,7 +2954,7 @@
       const status = rec ? rec.status : null;
       const half = rec ? (rec.half || null) : null;
       if(status===null){
-        if(weekend || isHoliday) totals.weekend++; else totals.work++;
+        if((weekend || isHoliday) && !isContractor) totals.weekend++; else totals.work++;
       } else if(status==='WORK'){ totals.work++; }
       else if(status==='STAT'){ totals.weekend++; }
       else if(status==='OFF'){ totals.weekend++; }
