@@ -268,6 +268,34 @@
   .gate-error{color:var(--red-strong);font-size:12px;min-height:16px;margin-bottom:6px;}
   .gate-link-btn{width:auto !important;background:none !important;border:none !important;color:var(--accent) !important;font-size:12.5px !important;padding:4px !important;text-decoration:underline;cursor:pointer;}
   .gate-note{font-size:11.5px;color:var(--grey-strong);text-align:left;margin:4px 0 10px;}
+  /* ---- close buttons, Manage users (merged people list), Login activity ---- */
+  .panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .panel-close, .modal button.panel-close{margin-top:0;padding:6px 12px;border-radius:7px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:12.5px;}
+  .users-modal{max-width:1240px !important;width:96vw !important;max-height:92vh;overflow-y:auto;padding:22px;}
+  .u-card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
+  .u-card.u-removed{opacity:.7;}
+  .u-top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;}
+  .u-f{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--grey-strong);}
+  .u-f input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px;color:var(--ink);width:100%;box-sizing:border-box;}
+  .u-name{flex:1.2;min-width:170px;}
+  .u-email{flex:1.6;min-width:210px;}
+  .u-role{flex:1;min-width:150px;}
+  .u-login{min-width:150px;}
+  .u-login-val{font-size:13px;color:var(--ink);padding:7px 0;}
+  .u-actions{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;align-items:center;}
+  .modal button.u-btn, .u-btn{margin-top:0;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:12px;color:var(--ink);}
+  .modal button.u-btn:disabled{opacity:.5;cursor:not-allowed;}
+  .u-perms{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:12.5px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);align-items:center;}
+  .u-perms label{display:flex;align-items:center;gap:5px;}
+  .u-perms input{width:auto;}
+  .u-viewonly{background:#eef5ff;border:1px solid #b9d3f5;border-radius:6px;padding:3px 8px;font-weight:600;}
+  .u-badge{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:10px;background:var(--paper);color:var(--grey-strong);margin-left:6px;}
+  .u-create{display:none;margin-top:10px;padding:10px;background:var(--paper);border-radius:8px;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  .u-create.show{display:flex;}
+  .users-add{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
+  table.la{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px;}
+  table.la th, table.la td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);}
+  table.la th{font-size:11px;color:var(--grey-strong);}
 </style>
 </head>
 <body>
@@ -329,6 +357,7 @@
         <button id="addEmpToggle">+ Employee</button>
         <button id="changePassBtn">Change my password</button>
         <button id="manageUsersBtn">Manage users</button>
+        <button id="loginActivityBtn">Login activity</button>
         <button id="backupBtn">Backup data (download)</button>
         <button id="restoreBtn">Restore from backup…</button>
         <input type="file" id="restoreFileInput" accept="application/json" style="display:none;">
@@ -375,6 +404,7 @@
     </div>
 
     <div class="panel" id="empPanel" style="display:none;">
+      <div class="panel-head"><strong>Employees</strong><button id="empPanelCloseX" class="panel-close" title="Close this panel">✕ Close</button></div>
       <div class="emp-manager" id="addEmpForm">
         <div class="field"><label>Name</label><input id="newEmpName" placeholder="e.g. Randy"></div>
         <div class="field"><label>Email</label><input id="newEmpEmail" placeholder="name@company.com"></div>
@@ -391,6 +421,7 @@
           <input type="email" id="ccEmailInput" placeholder="name@company.com">
         </div>
       </div>
+      <div style="text-align:right;margin-top:10px;"><button id="empPanelCloseBtn" class="panel-close">Close</button></div>
     </div>
 
     <div class="panel" style="margin-bottom:0;">
@@ -408,7 +439,7 @@
     <div id="tableWrap"></div>
   </div>
 
-  <div class="panel note">
+  <div class="panel note" id="calNote">
     Click a day to select it, or click a second day (even in a different employee's row) to select a block, then click a condition in the legend above to apply it. Click the same lone cell again to cancel a selection.
     Weekends and Alberta general holidays default to a day off (yellow) automatically. Days already in the past are tinted blue automatically.
     To swap someone's weekend for a weekday off — e.g. have them work Saturday and take Monday off instead — select the weekend day and apply "Work day," then select the weekday and apply "Weekend / Stat."
@@ -513,37 +544,54 @@
 </div>
 
 <div class="modal-backdrop" id="usersModalBackdrop">
-  <div class="modal" style="max-width:620px;max-height:85vh;overflow-y:auto;">
-    <h3>Manage users</h3>
-    <p class="note">Each checkbox below controls what that person can do after logging in. You (the account you're logged in as) can't remove your own admin access or delete yourself, and there must always be at least one administrator.</p>
+  <div class="modal users-modal">
+    <h3 style="display:flex;justify-content:space-between;align-items:center;">Manage users <button id="usersCloseX" class="panel-close">✕ Close</button></h3>
+    <p class="note">One list for everyone: each person on the schedule, their role, and — if they have one — their login and what they can do. Tick <strong>Calendar view only</strong> to let someone look at the calendar and nothing else. You can't remove your own admin access or delete yourself, and there must always be at least one administrator. Schedule-only details (order, contractor on/off days, vacation days/year) are still edited from ⚙ → + Employee.</p>
+    <div id="newUserResult" style="margin-bottom:10px;"></div>
     <div id="usersListBody"></div>
 
-    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
-      <h3 style="font-size:14px;">Add a user</h3>
+    <div class="users-add">
+      <h3 style="font-size:14px;margin:0 0 8px;">Add a person</h3>
       <div class="emp-manager">
         <div class="field"><label>Name</label><input id="newUserName" placeholder="e.g. Randy"></div>
-        <div class="field"><label>Username</label><input id="newUserUsername" placeholder="e.g. randy"></div>
-        <div class="field" style="flex:1;min-width:200px;"><label>Email (optional)</label><input id="newUserEmail" type="email" placeholder="name@company.com"></div>
+        <div class="field" style="flex:1;min-width:220px;"><label>Email</label><input id="newUserEmail" type="email" placeholder="name@company.com"></div>
+        <div class="field"><label>Role</label><input id="newUserRole" list="roleList" placeholder="e.g. AME"></div>
+        <div class="field"><label>Start date (optional)</label><input id="newUserStart" type="date"></div>
+        <div class="field"><label>Vacation days/year</label><input id="newUserVacDays" type="number" min="0" step="0.5" placeholder="30"></div>
       </div>
-      <div class="emp-manager" style="margin-top:8px;">
-        <div class="field"><label>Password</label><input id="newUserPassword" placeholder="Password"></div>
-        <button id="genUserPasswordBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--line);cursor:pointer;">Generate</button>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;margin:4px 0 10px;font-size:12.5px;">
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserOnSchedule" checked style="width:auto;"> Show on the schedule calendar</label>
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserContractor" style="width:auto;"> Contractor (21 on / 15 off — adjust after adding)</label>
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserCreateLogin" checked style="width:auto;"> Create a login</label>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:12px;margin:10px 0;font-size:12.5px;">
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserEditCalendar" checked style="width:auto;"> Edit calendar</label>
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserManageEmployees" style="width:auto;"> Manage employees</label>
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserEditVacationDays" style="width:auto;"> Change vacation days/year</label>
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserViewVacationDollar" style="width:auto;"> View vacation dollar value</label>
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserSendEmail" checked style="width:auto;"> Send Print &amp; email</label>
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserBackupRestore" style="width:auto;"> Backup / restore</label>
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserManageSettings" style="width:auto;"> Change settings</label>
-        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="newUserIsAdmin" style="width:auto;"> Administrator</label>
+      <div id="newUserLoginFields">
+        <div class="emp-manager">
+          <div class="field"><label>Username</label><input id="newUserUsername" placeholder="e.g. randy"></div>
+          <div class="field"><label>Password</label><input id="newUserPassword" placeholder="Password"></div>
+          <button id="genUserPasswordBtn" class="u-btn" style="padding:8px 14px;">Generate</button>
+        </div>
+        <div class="u-perms" id="newUserPerms" style="border-top:none;margin-top:0;padding-top:0;"></div>
       </div>
-      <button id="addUserBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--line);cursor:pointer;">Add user</button>
-      <div id="newUserResult" style="margin-top:10px;"></div>
+      <button id="addUserBtn" class="u-btn" style="padding:8px 16px;margin-top:10px;">Add person</button>
     </div>
+    <datalist id="roleList"></datalist>
 
     <button id="usersCloseBtn">Close</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="loginActivityBackdrop">
+  <div class="modal" style="max-width:780px;width:94vw;max-height:88vh;overflow-y:auto;">
+    <h3 style="display:flex;justify-content:space-between;align-items:center;">Login activity <button id="loginActivityCloseX" class="panel-close">✕ Close</button></h3>
+    <p class="note">Only administrators can see this. “Logged on now” means the person's screen has been open and signed in within the last couple of minutes. History starts from the first login after this feature was added.</p>
+    <div style="font-weight:700;margin:10px 0 6px;">Logged on now</div>
+    <div id="loginOnlineBody"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin:16px 0 6px;flex-wrap:wrap;">
+      <span style="font-weight:700;">Login history</span>
+      <select id="loginHistoryFilter" style="padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;"></select>
+      <button id="loginActivityRefreshBtn" class="u-btn">⟳ Refresh</button>
+    </div>
+    <div id="loginHistoryBody"></div>
   </div>
 </div>
 
@@ -782,8 +830,15 @@
   let currentUser = null;     // {id, name, username, email, passwordHash, permissions}
   let loginTimestamp = null;  // ISO string set the moment the current session unlocked
 
+  // "Calendar view only" (permissions.viewOnly) overrides every other checkbox: that person
+  // can look at the calendar and nothing else. Administrators can never be view-only.
   function can(permKey){
-    return !!(currentUser && currentUser.permissions && currentUser.permissions[permKey]);
+    const p = currentUser && currentUser.permissions;
+    if(!p) return false;
+    const viewOnly = !!p.viewOnly && !p.isAdmin;
+    if(permKey === 'viewOnly') return viewOnly;
+    if(viewOnly) return false;
+    return !!p[permKey];
   }
   function normalizeUsername(u){ return (u||'').trim().toLowerCase(); }
 
@@ -804,6 +859,7 @@
         PERMISSION_FIELDS.forEach(key=>{
           if(u.permissions[key] !== true){ u.permissions[key] = true; changed = true; }
         });
+        if(u.permissions.viewOnly){ u.permissions.viewOnly = false; changed = true; }
       }
     });
     if(changed){ try{ await saveUsers(users); }catch(e){} }
@@ -935,6 +991,7 @@
       currentUser = user;
       applyUserToBanner(user);
       loginTimestamp = new Date().toISOString();
+      recordLogin(user);
       // Recompute "today" (and the month/year the calendar should open to) right now,
       // rather than trusting the values captured whenever this script happened to start
       // running. If the gate sat open for a while (after an auto-lock reload, or just
@@ -1444,7 +1501,7 @@
       tbody.appendChild(tr);
     });
 
-    if(!forPrint){
+    if(!forPrint && !can('viewOnly')){
       const notesRow = document.createElement('tr');
       const notesLabelTd = document.createElement('td');
       notesLabelTd.className = 'emp';
@@ -1940,6 +1997,9 @@
     const p = document.getElementById('empPanel');
     p.style.display = p.style.display==='none' ? 'block':'none';
   };
+  const closeEmpPanel = ()=>{ document.getElementById('empPanel').style.display = 'none'; };
+  document.getElementById('empPanelCloseX').onclick = closeEmpPanel;
+  document.getElementById('empPanelCloseBtn').onclick = closeEmpPanel;
   async function logEmployeeChange(action, name, detail){
     await appendChangeLog(currentYear, [{ts:new Date().toISOString(), type:'employee', action, empName:name, detail: detail||'', by: currentUser ? currentUser.name : null}]);
   }
@@ -1953,6 +2013,9 @@
     const vacationDaysByYear = (can('editVacationDays') && vacDaysRaw !== '') ? {[currentYear]: parseFloat(vacDaysRaw) || 0} : {};
     const isContractor = document.getElementById('newEmpContractor').checked;
     if(!name) return;
+    if(state.employees.some(e=>e.active!==false && (e.name||'').trim().toLowerCase()===name.toLowerCase())){
+      alert(name + ' is already on the schedule.'); return;
+    }
     state.employees.push({id:'e'+Date.now(), name, email, active:true, hiredDate: startDate || null, vacationDaysByYear, isContractor});
     document.getElementById('newEmpName').value='';
     document.getElementById('newEmpEmail').value='';
@@ -2443,6 +2506,14 @@
     show('restoreBtn', can('backupRestore'));
     show('manageUsersBtn', can('isAdmin'));
     show('emailBtn', can('sendEmail'));
+    show('loginActivityBtn', can('isAdmin'));
+    // Calendar-view-only people get the calendar, the year switch and Refresh -- nothing else.
+    const vo = can('viewOnly');
+    ['pdfBtn','summaryBtn','hrReportBtn','clearSelectionBtn','calNote'].forEach(id=>show(id, !vo));
+    const monthsLbl = document.getElementById('pdfMonthCount');
+    if(monthsLbl && monthsLbl.closest('label')) monthsLbl.closest('label').style.display = vo ? 'none' : '';
+    ['morningStartInput','afternoonStartInput'].forEach(id=>{ const s = document.getElementById(id); if(s) s.disabled = vo; });
+    if(vo) closeEmpPanel();
     document.querySelectorAll('#gearDropdown .db-dropdown-row').forEach(row=>{
       row.style.display = can('manageSettings') ? '' : 'none';
     });
@@ -2450,88 +2521,377 @@
     if(companyInput) companyInput.disabled = !can('manageSettings');
   }
 
+  // ---------- login activity (admin only: who's logged on + login history) ----------
+  // Each signed-in screen writes a small "presence" row every minute and a line to the login
+  // log when someone logs in. "Logged on now" = heartbeat within the last 2.5 minutes and not
+  // explicitly signed out / auto-locked.
+  const PRESENCE_ONLINE_WINDOW_MS = 150000;
+  let presenceTimer = null;
+
+  async function writePresence(signedOut){
+    if(!currentUser) return;
+    const val = { name: currentUser.name, username: currentUser.username, since: loginTimestamp, last: new Date().toISOString(), out: !!signedOut };
+    try{ await storageSet('presence:' + currentUser.id, JSON.stringify(val), true); }catch(e){}
+  }
+
+  async function recordLogin(user){
+    try{
+      let arr = [];
+      try{ const raw = await storageGet('loginLog', true); arr = raw ? JSON.parse(raw) : []; }catch(e){}
+      arr.push({ ts: loginTimestamp, userId: user.id, name: user.name, username: user.username });
+      if(arr.length > 1000) arr = arr.slice(arr.length - 1000);
+      await storageSet('loginLog', JSON.stringify(arr), true);
+    }catch(e){}
+    await writePresence(false);
+    if(presenceTimer) clearInterval(presenceTimer);
+    presenceTimer = setInterval(()=>{ writePresence(false); }, 60000);
+  }
+
+  const loginActivityBackdrop = document.getElementById('loginActivityBackdrop');
+  function fmtDateTime(iso){
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleString(undefined, {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+  }
+  function laCell(tr, text, tag){
+    const c = document.createElement(tag || 'td'); c.textContent = text; tr.appendChild(c); return c;
+  }
+
+  async function renderLoginActivity(){
+    const onlineBody = document.getElementById('loginOnlineBody');
+    const histBody = document.getElementById('loginHistoryBody');
+    const filter = document.getElementById('loginHistoryFilter');
+    const keepFilter = filter.value;
+    onlineBody.textContent = 'Loading…'; histBody.textContent = '';
+
+    const users = await loadUsers();
+    const now = Date.now();
+    const presences = await Promise.all(users.map(async u=>{
+      try{
+        const raw = await storageGet('presence:' + u.id, true);
+        return raw ? { u, p: JSON.parse(raw) } : null;
+      }catch(e){ return null; }
+    }));
+    const online = presences.filter(x=> x && !x.p.out && (now - new Date(x.p.last).getTime()) <= PRESENCE_ONLINE_WINDOW_MS);
+
+    onlineBody.innerHTML = '';
+    if(!online.length){
+      onlineBody.innerHTML = '<div class="note">Nobody is logged on right now.</div>';
+    } else {
+      const t = document.createElement('table'); t.className = 'la';
+      const hr = document.createElement('tr');
+      ['Name','Username','Logged in at','Last seen'].forEach(h=>laCell(hr, h, 'th'));
+      t.appendChild(hr);
+      online.forEach(({u,p})=>{
+        const tr = document.createElement('tr');
+        laCell(tr, u.name + (currentUser && u.id===currentUser.id ? ' (you)' : ''));
+        laCell(tr, '@' + u.username);
+        laCell(tr, fmtDateTime(p.since));
+        laCell(tr, fmtDateTime(p.last));
+        t.appendChild(tr);
+      });
+      onlineBody.appendChild(t);
+    }
+
+    let log = [];
+    try{ const raw = await storageGet('loginLog', true); log = raw ? JSON.parse(raw) : []; }catch(e){}
+    // filter dropdown: everyone who has either a login now or an entry in the log
+    const people = new Map();
+    users.forEach(u=>people.set(u.id, u.name + ' (@' + u.username + ')'));
+    log.forEach(e=>{ if(!people.has(e.userId)) people.set(e.userId, e.name + ' (@' + e.username + ', deleted)'); });
+    filter.innerHTML = '';
+    const all = document.createElement('option'); all.value = ''; all.textContent = 'All users'; filter.appendChild(all);
+    people.forEach((label, id)=>{ const o = document.createElement('option'); o.value = id; o.textContent = label; filter.appendChild(o); });
+    if(keepFilter && people.has(keepFilter)) filter.value = keepFilter;
+
+    const rows = log.filter(e=> !filter.value || e.userId === filter.value).slice().reverse().slice(0, 300);
+    histBody.innerHTML = '';
+    if(!rows.length){
+      histBody.innerHTML = '<div class="note">No logins recorded yet.</div>';
+    } else {
+      const t = document.createElement('table'); t.className = 'la';
+      const hr = document.createElement('tr');
+      ['Date &amp; time','Name','Username'].forEach(h=>{ const th = document.createElement('th'); th.innerHTML = h; hr.appendChild(th); });
+      t.appendChild(hr);
+      rows.forEach(e=>{
+        const tr = document.createElement('tr');
+        laCell(tr, fmtDateTime(e.ts)); laCell(tr, e.name); laCell(tr, '@' + e.username);
+        t.appendChild(tr);
+      });
+      histBody.appendChild(t);
+      if(log.length > rows.length || (!filter.value && log.length > 300)){
+        const n = document.createElement('div'); n.className = 'note'; n.textContent = 'Showing the most recent ' + rows.length + ' entries.'; histBody.appendChild(n);
+      }
+    }
+  }
+
+  document.getElementById('loginActivityBtn').addEventListener('click', async ()=>{
+    gearDropdown.classList.remove('show');
+    if(!can('isAdmin')) return;
+    loginActivityBackdrop.classList.add('show');
+    await renderLoginActivity();
+  });
+  document.getElementById('loginActivityCloseX').onclick = ()=> loginActivityBackdrop.classList.remove('show');
+  document.getElementById('loginActivityRefreshBtn').onclick = renderLoginActivity;
+  document.getElementById('loginHistoryFilter').onchange = renderLoginActivity;
+
   // ---------- manage users (admin only) ----------
+  // One combined list: everyone on the schedule (an "employee") and/or with a login (a "user").
+  // A login is linked to its schedule employee by user.empId (matched automatically by exact
+  // name or email the first time, or linked by hand). Role is kept on both records.
   const usersBackdrop = document.getElementById('usersModalBackdrop');
+  const usersBox = usersBackdrop.querySelector('.users-modal');
+  const ROLE_SUGGESTIONS = ['AME','Apprentice','Manager','Contractor','Administrator'];
+  const VIEW_ONLY_LABEL = 'Calendar view only';
 
-  function renderUsersList(users){
-    const body = document.getElementById('usersListBody');
-    body.innerHTML = '';
-    const adminCount = users.filter(u=>u.permissions && u.permissions.isAdmin).length;
+  function personName(p){ return p.emp ? p.emp.name : p.user.name; }
+  function personEmail(p){ return (p.emp && p.emp.email) || (p.user && p.user.email) || ''; }
+  function personRole(p){ return (p.user && p.user.role) || (p.emp && p.emp.role) || ''; }
+
+  async function loadPeople(){
+    const users = await loadUsers();
+    const emps = state.employees;
+    const linked = new Map(); // empId -> user
+    users.forEach(u=>{ if(u.empId && emps.some(e=>e.id===u.empId) && !linked.has(u.empId)) linked.set(u.empId, u); });
+    let dirty = false;
     users.forEach(u=>{
-      const row = document.createElement('div');
-      row.style.cssText = 'border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;';
-      const head = document.createElement('div');
-      head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
-      const names = document.createElement('div');
-      names.innerHTML = '<strong>' + u.name + '</strong> <span style="color:var(--grey-strong);font-size:12px;">@' + u.username + (u.email ? ' · ' + u.email : '') + '</span>';
-      head.appendChild(names);
+      if(u.empId && linked.get(u.empId) === u) return;
+      const un = (u.name||'').trim().toLowerCase(), ue = (u.email||'').trim().toLowerCase();
+      const match = emps.find(e=> !linked.has(e.id) && ( (un && (e.name||'').trim().toLowerCase()===un) || (ue && (e.email||'').trim().toLowerCase()===ue) ));
+      if(match){ u.empId = match.id; linked.set(match.id, u); dirty = true; }
+      else if(u.empId){ delete u.empId; dirty = true; }
+    });
+    if(dirty) await saveUsers(users);
+    const active = [], removed = [], loginOnly = [];
+    emps.forEach(e=>{ (e.active===false ? removed : active).push({ emp:e, user: linked.get(e.id) || null }); });
+    users.forEach(u=>{ if(!u.empId) loginOnly.push({ emp:null, user:u }); });
+    return { users, people: [...active, ...loginOnly, ...removed] };
+  }
 
-      const actions = document.createElement('div');
-      actions.style.cssText = 'display:flex;gap:6px;';
-      const resetBtn = document.createElement('button');
-      resetBtn.textContent = 'Reset password';
-      resetBtn.style.cssText = 'padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:12px;';
-      resetBtn.onclick = async ()=>{
+  async function refreshUsersList(){
+    const st = usersBox.scrollTop;
+    const { users, people } = await loadPeople();
+    renderPeople(users, people);
+    usersBox.scrollTop = st;
+  }
+
+  // Name / email / role edits go to both records when a person has both.
+  async function savePersonFields(p, fields){
+    if(p.emp){
+      Object.assign(p.emp, fields);
+      if(fields.role === '') delete p.emp.role;
+      await saveEmployees();
+      if(fields.name !== undefined || fields.email !== undefined) logEmployeeChange('edited', p.emp.name);
+      renderAll();
+    }
+    if(p.user){
+      const fresh = await loadUsers();
+      const t = fresh.find(x=>x.id===p.user.id);
+      if(t){
+        Object.assign(t, fields);
+        if(fields.role === '') delete t.role;
+        await saveUsers(fresh);
+        if(currentUser && t.id===currentUser.id){ Object.assign(currentUser, fields); applyUserToBanner(currentUser); }
+      }
+    }
+  }
+
+  async function updatePerms(userId, mutate){
+    const fresh = await loadUsers();
+    const t = fresh.find(x=>x.id===userId);
+    if(!t) return;
+    t.permissions = t.permissions || {};
+    mutate(t.permissions);
+    if(!fresh.some(x=>x.permissions && x.permissions.isAdmin)){
+      alert('There must be at least one administrator — add another admin before removing this one.');
+      await refreshUsersList(); return;
+    }
+    await saveUsers(fresh);
+    if(currentUser && t.id===currentUser.id){ currentUser.permissions = {...t.permissions}; applyPermissionsToUI(); }
+    await refreshUsersList();
+  }
+
+  function uField(label, cls, child){
+    const d = document.createElement('div'); d.className = 'u-f ' + cls;
+    const l = document.createElement('label'); l.textContent = label; d.appendChild(l); d.appendChild(child);
+    return d;
+  }
+  function uInput(value, placeholder){
+    const i = document.createElement('input'); i.value = value || ''; if(placeholder) i.placeholder = placeholder; return i;
+  }
+  function uBtn(text, onclick){
+    const b = document.createElement('button'); b.className = 'u-btn'; b.textContent = text; b.onclick = onclick; return b;
+  }
+  function uCheck(label, checked, disabled, onchange, cls){
+    const l = document.createElement('label'); if(cls) l.className = cls;
+    const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!checked; c.disabled = !!disabled; c.onchange = onchange;
+    l.appendChild(c); l.appendChild(document.createTextNode(label));
+    return l;
+  }
+  function viewOnlyPermissions(){
+    const pm = { viewOnly:true }; PERMISSION_FIELDS.forEach(k=> pm[k] = false); return pm;
+  }
+
+  function buildPersonCard(p, users, adminCount, unlinkedEmps){
+    const u = p.user;
+    const removed = !!(p.emp && p.emp.active === false);
+    const card = document.createElement('div');
+    card.className = 'u-card' + (removed ? ' u-removed' : '');
+
+    const top = document.createElement('div'); top.className = 'u-top';
+    const nameIn = uInput(personName(p));
+    nameIn.onchange = async ()=>{
+      const v = nameIn.value.trim();
+      if(!v){ nameIn.value = personName(p); return; }
+      await savePersonFields(p, { name: v });
+    };
+    const nameField = uField('Name', 'u-name', nameIn);
+    const badgeText = removed ? 'Removed from schedule' : (!p.emp ? 'Login only — not on schedule' : '');
+    if(badgeText){ const bd = document.createElement('span'); bd.className = 'u-badge'; bd.textContent = badgeText; nameField.firstChild.appendChild(bd); }
+    top.appendChild(nameField);
+
+    const emailIn = uInput(personEmail(p), 'name@company.com'); emailIn.type = 'email';
+    emailIn.onchange = ()=> savePersonFields(p, { email: emailIn.value.trim() });
+    top.appendChild(uField('Email', 'u-email', emailIn));
+
+    const roleIn = uInput(personRole(p), 'e.g. AME'); roleIn.setAttribute('list', 'roleList');
+    roleIn.onchange = ()=> savePersonFields(p, { role: roleIn.value.trim() });
+    top.appendChild(uField('Role', 'u-role', roleIn));
+
+    const loginVal = document.createElement('div'); loginVal.className = 'u-login-val';
+    loginVal.textContent = u ? '@' + u.username : 'No login';
+    if(!u) loginVal.style.color = 'var(--grey-strong)';
+    top.appendChild(uField('Login', 'u-login', loginVal));
+
+    const actions = document.createElement('div'); actions.className = 'u-actions';
+    const createBox = document.createElement('div'); createBox.className = 'u-create';
+
+    if(u){
+      actions.appendChild(uBtn('Reset password', async ()=>{
         const newPass = randomPassword();
         const hash = await sha256(newPass);
         const fresh = await loadUsers();
         const target = fresh.find(x=>x.id===u.id);
         if(target){ target.passwordHash = hash; await saveUsers(fresh); }
         showCredentialResult(u, newPass, 'Password reset');
-      };
-      actions.appendChild(resetBtn);
-
-      const canDelete = !(u.id===currentUser.id) && !(u.permissions.isAdmin && adminCount<=1);
-      const delBtn = document.createElement('button');
-      delBtn.textContent = 'Delete';
-      delBtn.disabled = !canDelete;
-      delBtn.title = u.id===currentUser.id ? "You can't delete your own account while logged in as it."
-        : (!canDelete ? 'There must be at least one administrator.' : '');
-      delBtn.style.cssText = 'padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:12px;' + (canDelete ? '' : 'opacity:.5;cursor:not-allowed;');
-      delBtn.onclick = async ()=>{
+        usersBox.scrollTop = 0;
+      }));
+      const canDelete = !(u.id===currentUser.id) && !(u.permissions && u.permissions.isAdmin && adminCount<=1);
+      const del = uBtn('Delete login', async ()=>{
         if(!canDelete) return;
-        if(!confirm('Delete the login for ' + u.name + '? This cannot be undone.')) return;
+        if(!confirm('Delete the login for ' + u.name + '? They will stay on the schedule (if they are on it) but will no longer be able to log in. This cannot be undone.')) return;
         const fresh = (await loadUsers()).filter(x=>x.id!==u.id);
         await saveUsers(fresh);
-        await openUsersModal();
-      };
-      actions.appendChild(delBtn);
-      head.appendChild(actions);
-      row.appendChild(head);
-
-      const permsRow = document.createElement('div');
-      permsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;font-size:12.5px;';
-      PERMISSION_FIELDS.forEach(key=>{
-        const label = document.createElement('label');
-        label.style.cssText = 'display:flex;align-items:center;gap:5px;';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.style.width = 'auto';
-        cb.checked = !!u.permissions[key];
-        const lockSelf = (u.id===currentUser.id && key==='isAdmin' && adminCount<=1);
-        cb.disabled = lockSelf;
-        cb.onchange = async ()=>{
-          const fresh = await loadUsers();
-          const target = fresh.find(x=>x.id===u.id);
-          if(!target) return;
-          const freshAdminCount = fresh.filter(x=>x.permissions && x.permissions.isAdmin).length;
-          if(key==='isAdmin' && !cb.checked && freshAdminCount<=1 && target.permissions.isAdmin){
-            alert('There must be at least one administrator — add another admin before removing this one.');
-            cb.checked = true; return;
-          }
-          target.permissions[key] = cb.checked;
-          await saveUsers(fresh);
-          if(target.id===currentUser.id) currentUser.permissions = {...target.permissions};
-          applyPermissionsToUI();
-        };
-        label.appendChild(cb);
-        label.appendChild(document.createTextNode(PERMISSION_LABELS[key]));
-        permsRow.appendChild(label);
+        await refreshUsersList();
       });
-      row.appendChild(permsRow);
-      body.appendChild(row);
-    });
+      del.disabled = !canDelete;
+      del.title = u.id===currentUser.id ? "You can't delete your own account while logged in as it." : (!canDelete ? 'There must be at least one administrator.' : '');
+      actions.appendChild(del);
+
+      if(!p.emp && unlinkedEmps.length){
+        const sel = document.createElement('select'); sel.className = 'u-btn';
+        const o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Link to a schedule employee…'; sel.appendChild(o0);
+        unlinkedEmps.forEach(e=>{ const o = document.createElement('option'); o.value = e.id; o.textContent = e.name; sel.appendChild(o); });
+        sel.onchange = async ()=>{
+          if(!sel.value) return;
+          const emp = state.employees.find(e=>e.id===sel.value);
+          const fresh = await loadUsers();
+          const t = fresh.find(x=>x.id===u.id);
+          if(!emp || !t) return;
+          t.empId = emp.id;
+          if(t.role && !emp.role){ emp.role = t.role; await saveEmployees(); }
+          await saveUsers(fresh);
+          await refreshUsersList();
+        };
+        actions.appendChild(sel);
+      }
+    } else {
+      actions.appendChild(uBtn('Create login', ()=>{ createBox.classList.toggle('show'); }));
+      const uname = uInput((personName(p).split(/\s+/)[0] || '').toLowerCase().replace(/[^a-z0-9._-]/g,''), 'username');
+      const pass = uInput(randomPassword(), 'password');
+      createBox.appendChild(uField('Username', 'u-role', uname));
+      createBox.appendChild(uField('Password', 'u-role', pass));
+      createBox.appendChild(uBtn('Generate', ()=>{ pass.value = randomPassword(); }));
+      createBox.appendChild(uBtn('Create', async ()=>{
+        const username = uname.value.trim(); let password = pass.value;
+        if(!username){ alert('Enter a username.'); return; }
+        if(!password) password = randomPassword();
+        if(password.length < 4){ alert('Password must be at least 4 characters.'); return; }
+        const fresh = await loadUsers();
+        if(fresh.some(x=>normalizeUsername(x.username)===normalizeUsername(username))){ alert('That username is already taken.'); return; }
+        const nu = { id:'u'+Date.now(), name: personName(p), username, email: personEmail(p), passwordHash: await sha256(password), permissions: viewOnlyPermissions() };
+        if(personRole(p)) nu.role = personRole(p);
+        if(p.emp) nu.empId = p.emp.id;
+        fresh.push(nu);
+        await saveUsers(fresh);
+        showCredentialResult(nu, password, 'New login created (set to ' + VIEW_ONLY_LABEL.toLowerCase() + ' — change below if needed)');
+        await refreshUsersList();
+        usersBox.scrollTop = 0;
+      }));
+    }
+    top.appendChild(actions);
+    card.appendChild(top);
+    card.appendChild(createBox);
+
+    const perms = document.createElement('div'); perms.className = 'u-perms';
+    if(!u){
+      const n = document.createElement('span'); n.className = 'note'; n.textContent = 'No login yet — permissions apply once a login is created.'; perms.appendChild(n);
+    } else {
+      const pm = u.permissions || {};
+      const isAdminUser = !!pm.isAdmin;
+      const viewOnly = !!pm.viewOnly && !isAdminUser;
+      const voLabel = uCheck(VIEW_ONLY_LABEL, viewOnly, isAdminUser, (ev)=>{
+        const on = ev.target.checked;
+        updatePerms(u.id, (x)=>{ if(on){ PERMISSION_FIELDS.forEach(k=> x[k] = false); x.viewOnly = true; } else { x.viewOnly = false; } });
+      }, 'u-viewonly');
+      if(isAdminUser) voLabel.title = "Administrators can't be view-only.";
+      perms.appendChild(voLabel);
+      PERMISSION_FIELDS.forEach(key=>{
+        const lockSelfAdmin = (u.id===currentUser.id && key==='isAdmin' && adminCount<=1);
+        const disabled = viewOnly || lockSelfAdmin || (isAdminUser && key!=='isAdmin');
+        perms.appendChild(uCheck(PERMISSION_LABELS[key], pm[key], disabled, (ev)=>{
+          const on = ev.target.checked;
+          updatePerms(u.id, (x)=>{ x[key] = on; if(key==='isAdmin' && on) x.viewOnly = false; });
+        }));
+      });
+    }
+    card.appendChild(perms);
+    return card;
   }
+
+  function renderPeople(users, people){
+    const body = document.getElementById('usersListBody');
+    body.innerHTML = '';
+    const adminCount = users.filter(u=>u.permissions && u.permissions.isAdmin).length;
+    const roles = new Set(ROLE_SUGGESTIONS);
+    people.forEach(p=>{ const r = personRole(p); if(r) roles.add(r); });
+    const dl = document.getElementById('roleList'); dl.innerHTML = '';
+    roles.forEach(r=>{ const o = document.createElement('option'); o.value = r; dl.appendChild(o); });
+    const unlinkedEmps = state.employees.filter(e=> e.active!==false && !people.some(p=>p.emp===e && p.user));
+    if(!people.length){ body.innerHTML = '<p class="note">No people yet — add one below.</p>'; return; }
+    people.forEach(p=> body.appendChild(buildPersonCard(p, users, adminCount, unlinkedEmps)));
+  }
+
+  // "Add a person" form: permission checkboxes (generated) with the same view-only rule.
+  const NEW_USER_PERM_BOXES = {};
+  function initAddFormPerms(){
+    const box = document.getElementById('newUserPerms');
+    box.innerHTML = '';
+    const mk = (key, label, checked, cls)=>{
+      const l = uCheck(label, checked, false, null, cls);
+      NEW_USER_PERM_BOXES[key] = l.firstChild; box.appendChild(l); return l.firstChild;
+    };
+    const vo = mk('viewOnly', VIEW_ONLY_LABEL, true, 'u-viewonly');
+    PERMISSION_FIELDS.forEach(k=> mk(k, PERMISSION_LABELS[k], false));
+    const sync = ()=>{
+      PERMISSION_FIELDS.forEach(k=>{ const c = NEW_USER_PERM_BOXES[k]; if(vo.checked){ c.checked = false; c.disabled = true; } else { c.disabled = false; } });
+    };
+    vo.onchange = sync;
+    NEW_USER_PERM_BOXES.isAdmin.onchange = ()=>{ if(NEW_USER_PERM_BOXES.isAdmin.checked){ vo.checked = false; sync(); } };
+    sync();
+  }
+  document.getElementById('newUserCreateLogin').onchange = (e)=>{
+    document.getElementById('newUserLoginFields').style.display = e.target.checked ? '' : 'none';
+  };
 
   function showCredentialResult(user, plainPassword, heading){
     const box = document.getElementById('newUserResult');
@@ -2559,55 +2919,75 @@
 
   async function openUsersModal(){
     if(!can('isAdmin')) return;
-    const users = await loadUsers();
-    renderUsersList(users);
     document.getElementById('newUserResult').innerHTML = '';
-    document.getElementById('newUserName').value = '';
-    document.getElementById('newUserUsername').value = '';
-    document.getElementById('newUserEmail').value = '';
-    document.getElementById('newUserPassword').value = '';
+    ['newUserName','newUserEmail','newUserRole','newUserStart','newUserVacDays','newUserUsername','newUserPassword'].forEach(id=>{ document.getElementById(id).value = ''; });
+    document.getElementById('newUserOnSchedule').checked = true;
+    document.getElementById('newUserContractor').checked = false;
+    document.getElementById('newUserCreateLogin').checked = true;
+    document.getElementById('newUserLoginFields').style.display = '';
+    initAddFormPerms();
+    await refreshUsersList();
     usersBackdrop.classList.add('show');
+    usersBox.scrollTop = 0;
   }
   document.getElementById('manageUsersBtn').addEventListener('click', ()=>{ gearDropdown.classList.remove('show'); openUsersModal(); });
   document.getElementById('usersCloseBtn').onclick = ()=>{ usersBackdrop.classList.remove('show'); };
+  document.getElementById('usersCloseX').onclick = ()=>{ usersBackdrop.classList.remove('show'); };
   document.getElementById('genUserPasswordBtn').onclick = ()=>{ document.getElementById('newUserPassword').value = randomPassword(); };
 
   document.getElementById('addUserBtn').onclick = async ()=>{
+    if(!can('isAdmin')) return;
     const name = document.getElementById('newUserName').value.trim();
-    const username = document.getElementById('newUserUsername').value.trim();
     const email = document.getElementById('newUserEmail').value.trim();
-    let password = document.getElementById('newUserPassword').value;
-    if(!name || !username){ alert('Name and username are required.'); return; }
-    if(!password) password = randomPassword();
-    if(password.length<4){ alert('Password must be at least 4 characters.'); return; }
-    const users = await loadUsers();
-    if(users.some(u=>normalizeUsername(u.username)===normalizeUsername(username))){
-      alert('That username is already taken.'); return;
+    const role = document.getElementById('newUserRole').value.trim();
+    const start = document.getElementById('newUserStart').value;
+    const vacRaw = document.getElementById('newUserVacDays').value.trim();
+    const onSchedule = document.getElementById('newUserOnSchedule').checked;
+    const contractor = document.getElementById('newUserContractor').checked;
+    const createLogin = document.getElementById('newUserCreateLogin').checked;
+    if(!name){ alert('Enter a name.'); return; }
+    if(!onSchedule && !createLogin){ alert('Tick "Show on the schedule calendar", "Create a login", or both.'); return; }
+    if(onSchedule && state.employees.some(e=>e.active!==false && (e.name||'').trim().toLowerCase()===name.toLowerCase())){
+      alert(name + ' is already on the schedule — use their row above ("Create login") instead of adding them again.'); return;
     }
-    const hash = await sha256(password);
-    const newUser = {
-      id: 'u' + Date.now(),
-      name, username, email,
-      passwordHash: hash,
-      permissions: {
-        editCalendar: document.getElementById('newUserEditCalendar').checked,
-        manageEmployees: document.getElementById('newUserManageEmployees').checked,
-        editVacationDays: document.getElementById('newUserEditVacationDays').checked,
-        viewVacationDollar: document.getElementById('newUserViewVacationDollar').checked,
-        sendEmail: document.getElementById('newUserSendEmail').checked,
-        backupRestore: document.getElementById('newUserBackupRestore').checked,
-        manageSettings: document.getElementById('newUserManageSettings').checked,
-        isAdmin: document.getElementById('newUserIsAdmin').checked
-      }
-    };
-    users.push(newUser);
-    await saveUsers(users);
-    renderUsersList(users);
-    showCredentialResult(newUser, password, 'New login created');
-    document.getElementById('newUserName').value = '';
-    document.getElementById('newUserUsername').value = '';
-    document.getElementById('newUserEmail').value = '';
-    document.getElementById('newUserPassword').value = '';
+    let username = '', password = '';
+    if(createLogin){
+      username = document.getElementById('newUserUsername').value.trim();
+      password = document.getElementById('newUserPassword').value;
+      if(!username){ alert('Enter a username for the login (or untick "Create a login").'); return; }
+      if(!password) password = randomPassword();
+      if(password.length < 4){ alert('Password must be at least 4 characters.'); return; }
+      const existing = await loadUsers();
+      if(existing.some(x=>normalizeUsername(x.username)===normalizeUsername(username))){ alert('That username is already taken.'); return; }
+      if(existing.some(x=>(x.name||'').trim().toLowerCase()===name.toLowerCase())){ alert('A login for ' + name + ' already exists — find their row above.'); return; }
+    }
+    let emp = null;
+    if(onSchedule){
+      const vacationDaysByYear = (vacRaw !== '') ? {[currentYear]: parseFloat(vacRaw) || 0} : {};
+      emp = { id:'e'+Date.now(), name, email, active:true, hiredDate: start || null, vacationDaysByYear, isContractor: contractor };
+      if(role) emp.role = role;
+      state.employees.push(emp);
+      await saveEmployees();
+      logEmployeeChange('added', name);
+      renderAll();
+    }
+    let newUser = null;
+    if(createLogin){
+      const users = await loadUsers();
+      const permissions = {};
+      ['viewOnly', ...PERMISSION_FIELDS].forEach(k=>{ permissions[k] = !!NEW_USER_PERM_BOXES[k].checked; });
+      newUser = { id:'u'+Date.now(), name, username, email, passwordHash: await sha256(password), permissions };
+      if(role) newUser.role = role;
+      if(emp) newUser.empId = emp.id;
+      users.push(newUser);
+      await saveUsers(users);
+    }
+    ['newUserName','newUserEmail','newUserRole','newUserStart','newUserVacDays','newUserUsername','newUserPassword'].forEach(id=>{ document.getElementById(id).value = ''; });
+    document.getElementById('newUserContractor').checked = false;
+    initAddFormPerms();
+    if(newUser) showCredentialResult(newUser, password, 'New login created'); else document.getElementById('newUserResult').innerHTML = '';
+    await refreshUsersList();
+    usersBox.scrollTop = 0;
   };
 
   // ---------- auto-lock after inactivity ----------
@@ -2619,7 +2999,8 @@
   let lastActivityAt = Date.now();
 
   function lockApp(){
-    location.reload();
+    const done = ()=>location.reload();
+    Promise.race([writePresence(true), new Promise(r=>setTimeout(r, 1500))]).then(done, done);
   }
 
   function resetInactivityTimer(){
@@ -2722,9 +3103,7 @@
     profileBackdrop.classList.add('show');
   };
   document.getElementById('profileCloseX').onclick = ()=> profileBackdrop.classList.remove('show');
-  document.getElementById('profileSignOutBtn').onclick = ()=>{
-    location.reload();
-  };
+  document.getElementById('profileSignOutBtn').onclick = ()=>{ lockApp(); };
 
   // ---------- CC email (kept out of the Employee list entirely) ----------
   async function initCcEmail(){
